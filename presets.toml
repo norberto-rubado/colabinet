@@ -474,7 +474,7 @@ A100-80 = { gen_tps = 139.787, prefill_tps = 6471.44, date = "2026-11-19", note 
 [[preset]]
 id = "qwen38-flash-next-sc117-abl-iq3s"
 engine = "llamacpp"
-label = "Qwen3.8-Flash-Next 无审查 IQ3_S（SC117，全显存，1M 上下文可选）"
+label = "Qwen3.8-Flash-Next 无审查 IQ3_S（SC117，全显存）"
 repo = "SC117/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF"
 file = "IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00001-of-00002.gguf"
 alias = "qwen3.8-flash-next-abliterated"
