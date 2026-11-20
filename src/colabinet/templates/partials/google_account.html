@@ -2,91 +2,91 @@
 <section id="google-account" class="card" data-auth-state="{{ account.state }}" hx-ext="cb-patch"
          hx-target="#google-account" hx-swap="cb-patch-outer" hx-sync="#google-account:queue last" hx-history="false"
          {% if account.busy %}hx-get="/ui/auth" hx-trigger="every 1s"{% endif %}>
-  <header>{{ card_title('Google accounts', 'user') }}<p>Connect your accounts to manage Colab sessions. Signing in does not allocate a runtime.</p></header>
+  <header>{{ card_title('Google 账号', 'user') }}<p>连接账号以管理 Colab 会话。登录不会分配运行时。</p></header>
   <section>
     <div id="google-account-status" role="status" aria-live="polite">
       {% if account.state == 'connected' %}
       <div class="cb-account">
         <span class="cb-account-avatar" aria-hidden="true">{{ (account.email or '?')[0] | upper }}</span>
-        <div><p><span class="cb-account-email">{{ account.email or 'Google account verified (email unavailable)' }}</span> <span class="badge" data-tone="success">Connected</span></p>
-          <p>Compute-unit balance: {{ account.balance | num(2) }} CU.</p></div>
+        <div><p><span class="cb-account-email">{{ account.email or 'Google 账号已验证（无法获取邮箱）' }}</span> <span class="badge" data-tone="success">已连接</span></p>
+          <p>计算单元余额：{{ account.balance | num(2) }} CU。</p></div>
       </div>
       {% elif account.state == 'waiting' %}
-      <ol><li>Open Google sign-in, choose your account, and approve the requested permissions.</li>
-        <li>Copy the authorization code from Google's completion page and paste it below.</li></ol>
-      <p class="cb-muted">Google's completion page may say “Sign in to the gcloud CLI.” Keep this console tab open.</p>
+      <ol><li>打开 Google 登录页，选择账号并授予所请求的权限。</li>
+        <li>从 Google 完成页复制授权码，粘贴到下方。</li></ol>
+      <p class="cb-muted">Google 完成页可能显示“Sign in to the gcloud CLI”，这是正常的。请保持此控制台标签页打开。</p>
       {% elif account.state in ('starting', 'checking', 'verifying', 'cancelling') %}
-      <p class="cb-row"><span class="badge cb-state" data-tone="progress">{{ {'starting': 'Preparing Google sign-in…', 'checking': 'Checking your Google account…',
-             'verifying': 'Verifying your Google account…', 'cancelling': 'Cancelling sign-in…'}[account.state] }}</span></p>
-      {% elif account.state == 'cancelled' %}<p>Sign-in cancelled. You can start again.</p>
-      {% elif account.state == 'signed_out' %}<p>Logged out of this console. Sign in or switch to another saved account.</p>
-      {% elif account.error %}<div class="alert" data-variant="warning">{{ icon('alert') }}<h2>Account not connected</h2><section><p>{{ account.error }}</p></section></div>
-      {% else %}<p>Check your connection or sign in to your Google account.</p>{% endif %}
+      <p class="cb-row"><span class="badge cb-state" data-tone="progress">{{ {'starting': '正在准备 Google 登录…', 'checking': '正在检查 Google 账号…',
+             'verifying': '正在验证 Google 账号…', 'cancelling': '正在取消登录…'}[account.state] }}</span></p>
+      {% elif account.state == 'cancelled' %}<p>已取消登录，可重新开始。</p>
+      {% elif account.state == 'signed_out' %}<p>已从此控制台退出登录。请重新登录或切换到其他已保存的账号。</p>
+      {% elif account.error %}<div class="alert" data-variant="warning">{{ icon('alert') }}<h2>账号未连接</h2><section><p>{{ account.error }}</p></section></div>
+      {% else %}<p>请检查连接，或登录你的 Google 账号。</p>{% endif %}
     </div>
     {% if account.active_email and account.state != 'connected' %}
-    <p class="cb-muted">Active account: {{ account.active_email }}. Adding another account keeps this connection until sign-in succeeds.</p>
+    <p class="cb-muted">当前账号：{{ account.active_email }}。添加其他账号时，在新账号登录成功前会保持此连接。</p>
     {% endif %}
     {% if account.state == 'waiting' %}
     <p><a id="google-consent-link" class="btn" href="{{ account.url }}" target="_blank"
-          rel="noopener noreferrer" referrerpolicy="no-referrer">{{ icon('external') }}Open Google sign-in</a></p>
+          rel="noopener noreferrer" referrerpolicy="no-referrer">{{ icon('external') }}打开 Google 登录</a></p>
     <form id="google-code-form" class="form" hx-post="/ui/actions/auth/code" autocomplete="off"
           hx-on::after-request="this.reset()">
       <input type="hidden" name="flow_id" value="{{ account.flow_id }}">
-      <div class="field"><label class="label" for="google-authorization-code">Authorization code</label>
+      <div class="field"><label class="label" for="google-authorization-code">授权码</label>
         <input id="google-authorization-code" class="input" type="password" name="code" required maxlength="4096"
                autocomplete="off" spellcheck="false" autocapitalize="off"></div>
-      <button class="btn" type="submit">Connect account</button>
+      <button class="btn" type="submit">连接账号</button>
     </form>
     {% endif %}
     <div class="cb-row cb-form-footer">
       {% if account.busy %}
       {% if account.state == 'checking' %}
-      {% if account.mode == 'oauth2' %}<button class="btn" type="button" disabled>Sign in with Google</button>{% endif %}
-      <button class="btn" data-variant="outline" hx-post="/ui/actions/auth/check" disabled>Check account</button>
+      {% if account.mode == 'oauth2' %}<button class="btn" type="button" disabled>使用 Google 登录</button>{% endif %}
+      <button class="btn" data-variant="outline" hx-post="/ui/actions/auth/check" disabled>检查账号</button>
       {% endif %}
       <form hx-post="/ui/actions/auth/cancel"><input type="hidden" name="flow_id" value="{{ account.flow_id }}">
-        <button class="btn" data-variant="outline" type="submit">Cancel</button></form>
+        <button class="btn" data-variant="outline" type="submit">取消</button></form>
       {% else %}
       {% if account.mode == 'oauth2' and account.active_email %}
-      <button id="google-add-account" class="btn" hx-post="/ui/actions/auth/start">Add account</button>
+      <button id="google-add-account" class="btn" hx-post="/ui/actions/auth/start">添加账号</button>
       <form hx-post="/ui/actions/auth/start"><input type="hidden" name="account_id" value="{{ account.active_id }}">
-        <button id="google-account-reconnect" class="btn" data-variant="outline" type="submit">Sign in again</button></form>
+        <button id="google-account-reconnect" class="btn" data-variant="outline" type="submit">重新登录</button></form>
       <form hx-post="/ui/actions/auth/logout"><input type="hidden" name="account_id" value="{{ account.active_id }}">
-        <button id="google-account-logout" class="btn" data-variant="outline" type="submit">Log out</button></form>
+        <button id="google-account-logout" class="btn" data-variant="outline" type="submit">退出登录</button></form>
       {% elif account.mode == 'oauth2' %}
-      <button id="google-login-start" class="btn" hx-post="/ui/actions/auth/start">Sign in with Google</button>
+      <button id="google-login-start" class="btn" hx-post="/ui/actions/auth/start">使用 Google 登录</button>
       {% endif %}
-      <button id="google-account-check" class="btn" data-variant="outline" hx-post="/ui/actions/auth/check">Check account</button>
+      <button id="google-account-check" class="btn" data-variant="outline" hx-post="/ui/actions/auth/check">检查账号</button>
       {% endif %}
     </div>
     {% if account.accounts and account.mode == 'oauth2' %}
-    <div class="table-container cb-form-footer"><table class="table" aria-label="Saved Google accounts">
-      <thead><tr><th>Account</th><th>Status</th><th>Action</th></tr></thead>
+    <div class="table-container cb-form-footer"><table class="table" aria-label="已保存的 Google 账号">
+      <thead><tr><th>账号</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>{% for saved in account.accounts %}
         <tr id="google-saved-{{ saved.id }}" data-account-email="{{ saved.email }}">
-          <td>{{ saved.email }}{% if saved.shared %}<br><small class="cb-muted">Shared CLI account</small>{% endif %}</td>
-          <td>{% if saved.active and saved.signed_in %}<span class="badge" data-tone="success">Active</span>{% elif saved.active %}<span class="badge" data-tone="warning">Needs sign-in</span>{% elif saved.signed_in %}<span class="badge" data-tone="neutral">Signed in</span>{% else %}<span class="badge" data-tone="neutral">Logged out</span>{% endif %}</td>
-          <td>{% if saved.active %}<span class="badge" data-tone="info">Current account</span>
+          <td>{{ saved.email }}{% if saved.shared %}<br><small class="cb-muted">共享 CLI 账号</small>{% endif %}</td>
+          <td>{% if saved.active and saved.signed_in %}<span class="badge" data-tone="success">使用中</span>{% elif saved.active %}<span class="badge" data-tone="warning">需要登录</span>{% elif saved.signed_in %}<span class="badge" data-tone="neutral">已登录</span>{% else %}<span class="badge" data-tone="neutral">已退出</span>{% endif %}</td>
+          <td>{% if saved.active %}<span class="badge" data-tone="info">当前账号</span>
           {% elif saved.signed_in %}<form hx-post="/ui/actions/auth/switch">
             <input type="hidden" name="account_id" value="{{ saved.id }}">
-            <button class="btn" data-size="sm" data-variant="outline" type="submit" {% if account.busy %}disabled{% endif %}>Switch</button>
+            <button class="btn" data-size="sm" data-variant="outline" type="submit" {% if account.busy %}disabled{% endif %}>切换</button>
           </form>{% else %}<form hx-post="/ui/actions/auth/start">
             <input type="hidden" name="account_id" value="{{ saved.id }}">
             <button class="btn" data-size="sm" data-variant="outline" type="submit"
-                    {% if account.busy %}disabled{% endif %}>Sign in with Google</button></form>{% endif %}</td>
+                    {% if account.busy %}disabled{% endif %}>使用 Google 登录</button></form>{% endif %}</td>
         </tr>
       {% endfor %}</tbody>
     </table></div>
     {% endif %}
     <div class="cb-fineprint">
     {% if account.mode == 'adc' %}
-    <p>This console uses Application Default Credentials. Sign in using
-      <code>gcloud auth application-default login</code> with the scopes in the installation guide, then select Check account.</p>
+    <p>本控制台使用应用默认凭据（ADC）。请按安装指南中的 scope 运行
+      <code>gcloud auth application-default login</code> 登录，然后点击“检查账号”。</p>
     {% else %}
-    <p>Google handles your password and two-step verification. Added accounts use separate private credentials on this Mac.
-      Stop managed sessions and wait for confirmed termination before adding, switching, or logging out.</p>
-    <p>Log out removes the active profile's saved Google credentials. For a shared CLI account it disconnects this console;
-      the CLI's existing credentials remain available outside Colabinet.</p>
+    <p>密码和两步验证由 Google 处理。添加的账号在本机使用各自独立的私有凭据。
+      添加、切换或退出账号前，请先停止托管会话，并等待确认已终止。</p>
+    <p>退出登录会删除当前配置已保存的 Google 凭据。对于共享 CLI 账号，只会断开此控制台的连接；
+      CLI 原有凭据在 colabinet 之外仍可使用。</p>
     {% endif %}
     </div>
   </section>

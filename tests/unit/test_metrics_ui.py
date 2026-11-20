@@ -52,11 +52,11 @@ return { initial, changed };
     assert {item["value"] for item in options if item["name"] == "group_by"} == set(GROUPS)
     assert {item["value"] for item in options if item["name"] == "measures"} == set(MEASURES) | {"cu", "out_per_cu"}
     sections = {item["value"]: item.get("section") for item in options}
-    assert sections["gpu"] == sections["model_kv"] == "Model & hardware"
-    assert sections["client"] == "Request details" and sections["day"] == "Time"
-    assert sections["prefill_tps_p90"] == "Throughput" and sections["ttft_p90"] == "Latency"
-    assert sections["tokens_out"] == "Tokens" and sections["cu"] == "Usage & cost"
-    assert initial["prefillLabel"] == "Prefill P90, tokens per second"
+    assert sections["gpu"] == sections["model_kv"] == "模型与硬件"
+    assert sections["client"] == "请求详情" and sections["day"] == "时间"
+    assert sections["prefill_tps_p90"] == "吞吐量" and sections["ttft_p90"] == "延迟"
+    assert sections["tokens_out"] == "Token" and sections["cu"] == "用量与成本"
+    assert initial["prefillLabel"] == "预填充 P90，每秒 token 数"
     assert set(result["changed"]["groups"]) == set(spec.group_by) | {"day"}
     assert set(result["changed"]["measures"]) == set(spec.measures) | {"prefill_tps_p90"}
 
@@ -124,11 +124,11 @@ return { initial, expanded, selected, cleared };
     assert initial.filters["gpu"] == ["L4"] and initial.filters["model"] == ["archived/model"]
     assert initial.filters["status_class"] == "5xx" and initial.filters["exclude_playground"]
     assert initial.chart == "table"
-    assert result["initial"]["labels"] == ["Response status", "Chart type"]
-    assert result["initial"]["count"] == "1 selected" and not result["initial"]["open"]
+    assert result["initial"]["labels"] == ["响应状态", "图表类型"]
+    assert result["initial"]["count"] == "已选 1 项" and not result["initial"]["open"]
     assert result["expanded"]
-    assert result["selected"] == {"count": "2 selected", "values": ["L4", "G4"]}
+    assert result["selected"] == {"count": "已选 2 项", "values": ["L4", "G4"]}
     cleared = QuerySpec.parse(spec_from_form(FormData(result["cleared"]["entries"])))
     assert "gpu" not in cleared.filters and not cleared.filters["exclude_playground"]
     assert cleared.filters["model"] == ["archived/model"]
-    assert result["cleared"]["count"] == "All"
+    assert result["cleared"]["count"] == "全部"

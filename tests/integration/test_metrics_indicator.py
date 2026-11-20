@@ -143,7 +143,7 @@ return { before, duringCount: during.length, lostCount: lost.length, lost, after
     # The indicator node survives the out-of-band result swap.
     assert result["after"]["sameNode"], result["after"]
     assert result["after"]["runningHidden"], result["after"]
-    assert "rows" in result["after"]["summary"], result["after"]
+    assert "行" in result["after"]["summary"], result["after"]
 
 
 async def test_result_summary_is_written_into_the_preserved_indicator(metrics_console):
@@ -163,7 +163,7 @@ return await evaluate(`(() => {
 })()`);
 """)
     assert result["hasRunningChild"], result
-    assert "rows" in result["summary"] and "results below" in result["summary"], result
+    assert "行" in result["summary"] and "结果见下方" in result["summary"], result
 
 
 async def test_error_branch_keeps_the_indicator_node_and_running_child(metrics_console):

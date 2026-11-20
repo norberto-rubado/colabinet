@@ -108,7 +108,7 @@ return { initial, edited, copied };
     assert result["copied"]["values"] == [result["edited"]["python"], result["edited"]["curl"]]
     assert result["copied"]["injected"] is False
     for version, port, alias, content, limit, thinking in (
-        ("initial", ports[1], "model-2", "Say hello in five words.", 256, "none"),
+        ("initial", ports[1], "model-2", "用五个字打个招呼。", 256, "none"),
         ("edited", ports[0], "model-1", prompt, 37, "high"),
     ):
         python = subprocess.run([sys.executable, "-c", result[version]["python"]],
@@ -194,11 +194,11 @@ return await evaluate(`(async () => {
     assert result["labelled"] is True
     assert result["options"] == ["Python 3", "curl"]
     assert result["initial"] == {"language": "python", "visible": ["pg-python-example"],
-                                  "copyLabel": "Copy Python example"}
+                                  "copyLabel": "复制 Python 示例"}
     assert result["curl"] == {"language": "curl", "visible": ["pg-curl-example"],
-                               "copyLabel": "Copy curl example"}
+                               "copyLabel": "复制 curl 示例"}
     assert result["returned"] == result["initial"]
-    assert "Say hello in five words." in result["values"][0]
+    assert "用五个字打个招呼。" in result["values"][0]
     assert result["values"][0].startswith("import json")
     assert result["values"][1] == result["curlText"]
     assert "Updated while curl is selected" in result["python"]
@@ -230,9 +230,9 @@ return await evaluate(`(async () => {
     codeLabel: panel.getAttribute('aria-label') };
 })()`);
 """)
-    assert result["toasts"][0][:2] == ["success", "Copied Python example"]
-    assert result["toasts"][1] == ["success", "Copied", "http://127.0.0.1:34001/v1"]
-    assert result["toasts"][2][:2] == ["success", "Copied curl example"]
-    assert result["toasts"][3] == ["error", "Could not copy", "Select the text and copy it manually."]
+    assert result["toasts"][0][:2] == ["success", "已复制 Python 示例"]
+    assert result["toasts"][1] == ["success", "已复制", "http://127.0.0.1:34001/v1"]
+    assert result["toasts"][2][:2] == ["success", "已复制 curl 示例"]
+    assert result["toasts"][3] == ["error", "复制失败", "请选中文本后手动复制。"]
     assert result["codeFocusable"] is True
-    assert result["codeLabel"] == "curl example"
+    assert result["codeLabel"] == "curl 示例"

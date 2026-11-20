@@ -29,9 +29,13 @@ from .login import GoogleLogin, LoginError
 TEMPLATES_DIR = PACKAGE_DIR / "templates"
 STATIC_DIR = PACKAGE_DIR / "static"
 PLAYGROUND_UA = "colabinet-playground"
-TOAST_STATES = {"ready": ("success", "is ready"), "stopped": ("info", "stopped"),
-                "setup_failed": ("error", "setup failed"), "engine_down": ("error", "engine is down"),
-                "gpu_mismatch": ("warning", "got a different GPU"), "failed": ("error", "could not be created")}
+TOAST_STATES = {"ready": ("success", "已就绪"), "stopped": ("info", "已停止"),
+                "setup_failed": ("error", "设置失败"), "engine_down": ("error", "推理引擎已停止响应"),
+                "gpu_mismatch": ("warning", "分配到的 GPU 与请求不符"), "failed": ("error", "创建失败")}
+# Display text for stop_reason codes in toasts; unknown codes are shown as-is.
+STOP_REASONS = {"user": "手动停止", "idle": "闲置自动停止", "daily_cap": "每日上限", "cu_cap": "CU 上限",
+                "deadline": "定时停止", "setup_failed": "设置失败", "gpu_mismatch": "GPU 不符",
+                "reclaimed": "已被 Colab 回收", "foreign_vm": "非本会话的 VM", "unreachable": "无法访问"}
 
 def _form_projection(value: Any) -> bool | None:
     if value in (None, ""):
@@ -40,7 +44,7 @@ def _form_projection(value: Any) -> bool | None:
         return True
     if value == "false":
         return False
-    raise ValueError("refusal projection must be on, off or unchanged")
+    raise ValueError("拒答投影只能是开启、关闭或不变")
 
 
 
@@ -49,12 +53,12 @@ def _ago(timestamp: float | None) -> str:
         return "-"
     statement = max(0, time.time() - timestamp)
     if statement < 60:
-        return f"{statement:.0f}s ago"
+        return f"{statement:.0f} 秒前"
     if statement < 3600:
-        return f"{statement / 60:.0f} min ago"
+        return f"{statement / 60:.0f} 分钟前"
     if statement < 86400:
-        return f"{statement / 3600:.1f} h ago"
-    return f"{statement / 86400:.0f} d ago"
+        return f"{statement / 3600:.1f} 小时前"
+    return f"{statement / 86400:.0f} 天前"
 
 
 def _dur(statement: float | None) -> str:
@@ -62,10 +66,10 @@ def _dur(statement: float | None) -> str:
         return "-"
     statement = max(0, int(statement))
     if statement < 60:
-        return f"{statement}s"
+        return f"{statement} 秒"
     if statement < 3600:
-        return f"{statement // 60}m {statement % 60:02d}s"
-    return f"{statement // 3600}h {statement % 3600 // 60:02d}m"
+        return f"{statement // 60} 分 {statement % 60:02d} 秒"
+    return f"{statement // 3600} 小时 {statement % 3600 // 60:02d} 分"
 
 
 def _num(value: Any, digits: int = 1) -> str:
@@ -160,7 +164,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
     async def session(request: Request, sid: int, tab: str = "overview"):
         detail = await views.session_detail(sup, sid)
         if detail is None:
-            return HTMLResponse("session not found", 404)
+            return HTMLResponse("未找到会话", 404)
         presets = [] if isinstance(sup.presets, PresetError) else list(sup.presets.presets.values())
         return await page(request, "pages/session.html", "sessions", detail=detail, tab=tab, presets=presets)
 
@@ -251,11 +255,11 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
             elif action == "logout":
                 await login.logout(str(form.get("account_id", "")))
             else:
-                return JSONResponse({"error": "unknown account action"}, 404)
+                return JSONResponse({"error": "未知的账号操作"}, 404)
         except (LoginError, CreateRefused) as exc:
             return JSONResponse({"error": str(exc)}, 409, headers={"Cache-Control": "no-store"})
         except OSError:
-            return JSONResponse({"error": "The account change could not be saved. Check data-directory permissions."},
+            return JSONResponse({"error": "无法保存账号变更。请检查数据目录的权限。"},
                                 409, headers={"Cache-Control": "no-store"})
         return account_card(request)
 
@@ -292,23 +296,23 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         if part == "resources":
             resources = await views.session_resources(sup, sid)
             return partial(request, "partials/session_resources.html", resources=resources) if resources else (
-                HTMLResponse("session not found", 404))
+                HTMLResponse("未找到会话", 404))
         if part == "controls":
             session = await sup.store.session(sid)
             return partial(request, "partials/session_controls.html", session=session, refresh_badge=True) if (
-                session) else HTMLResponse("session not found", 404)
+                session) else HTMLResponse("未找到会话", 404)
         if part == "logs.txt":
             creation = await sup.store.creation_diagnostics(sid)
             if creation is None:
-                return HTMLResponse("session not found", 404)
+                return HTMLResponse("未找到会话", 404)
             events = await sup.store.db.fetchall(
                 "SELECT * FROM events WHERE session_id = ? ORDER BY id DESC LIMIT 200", (sid,))
-            lines = ["Creation log", f"Exit code: {creation['exit_code']}" if creation["exit_code"] is not None
-                     else "Exit code: not recorded", creation["output"] or creation["error"] or "No output captured.",
-                     "", "Lifecycle events (latest 200)"]
+            lines = ["创建日志", f"退出码：{creation['exit_code']}" if creation["exit_code"] is not None
+                     else "退出码：未记录", creation["output"] or creation["error"] or "没有捕获到输出。",
+                     "", "生命周期事件（最近 200 条）"]
             lines.extend(f"{views.now_str(event['ts'])} {event['kind']} {event['detail_json'] or ''}"
                          for event in reversed(events))
-            lines.extend(["", "Engine log (latest 500 lines)", *sup.logs(sid)])
+            lines.extend(["", "推理引擎日志（最近 500 行）", *sup.logs(sid)])
             return PlainTextResponse(redact_diagnostic("\n".join(lines)) + "\n", headers={
                 "Content-Disposition": f'attachment; filename="session-{sid}.log"',
             })
@@ -323,7 +327,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         if part == "logs":
             creation = await sup.store.creation_diagnostics(sid)
             if creation is None:
-                return HTMLResponse("session not found", 404)
+                return HTMLResponse("未找到会话", 404)
             lines, cursor = sup.logs_after(sid, after)
             events = await sup.store.events(sid, after_event)
             events = [{**event, "detail_json": redact_diagnostic(event["detail_json"] or "")} for event in events]
@@ -338,7 +342,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
     @router.post("/ui/sessions/{sid}/watch")
     async def watch_session(sid: int):
         if not await sup.observe_session(sid):
-            return HTMLResponse("session not found", 404)
+            return HTMLResponse("未找到会话", 404)
         return Response(status_code=204)
 
     @router.post("/ui/new/estimate", response_class=HTMLResponse)
@@ -357,7 +361,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
             if projection is None:
                 projection = preset.refusal_projection if preset else False
             if projection and engine != "strata":
-                return JSONResponse({"error": "experimental refusal projection is supported only by Strata"}, 409)
+                return JSONResponse({"error": "只有 Strata 支持实验性拒答投影"}, 409)
             # Every offered class is assessed with the form's settings, so the GPU choices can grey out
             # the ones this configuration cannot run; the review below details the selected one.
             offered = views.gpu_choices((await sup.settings_values())["eligible_gpus"])
@@ -375,7 +379,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
             cost = {"rate": rate, "idle_waste": rate * idle / 60 if rate and idle else None,
                     "cap_minutes": cap / rate * 60 if cap and rate else None, "idle": idle, "cap": cap,
                     "no_limit": not idle and not cap and not form.get("deadline"),
-                    "endpoint": form.get("proxy_port") or f"next free from {sup.s.proxy_port_start}"}
+                    "endpoint": form.get("proxy_port") or f"从 {sup.s.proxy_port_start} 起的第一个空闲端口"}
             daily = {"spend": await sup.spend_today(), "cap": await sup.cap_today()}
             if rate and daily["cap"]:
                 left = daily["cap"] - daily["spend"]
@@ -384,7 +388,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
                            suggest=suggest, cost=cost, daily=daily, gpu=gpu,
                            ctx=ctx, kv=kv, preset=preset, engine=engine, refusal_projection=projection)
         except (ValueError, TypeError):
-            return JSONResponse({"error": "check context, KV cache and cost fields"}, 409)
+            return JSONResponse({"error": "请检查上下文、KV cache 和成本字段"}, 409)
 
     @router.post("/ui/metrics/run", response_class=HTMLResponse)
     async def metrics_run(request: Request):
@@ -421,14 +425,14 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         form = await request.form()
         name = (form.get("name") or "").strip()
         if not name:
-            return JSONResponse({"error": "give the query a name"}, 409)
+            return JSONResponse({"error": "请为查询命名"}, 409)
         try:
             spec = QuerySpec.parse(spec_from_form(form))
         except QueryError as exc:
             return JSONResponse({"error": str(exc)}, 409)
         qid = await services.save_query(sup, name, json.loads(spec.to_json()))
         resp = navigate(f"/metrics?saved={qid}" if qid else "/metrics")
-        return toast(resp, "success", f"Saved “{name}”")
+        return toast(resp, "success", f"已保存“{name}”")
 
     @router.post("/ui/metrics/saved/{qid}/delete")
     async def metrics_delete(qid: int):
@@ -448,11 +452,12 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         for row in rows:
             detail = json.loads(row["detail_json"]) if row["detail_json"] else {}
             if row["kind"] == "stop_unconfirmed":
-                out.append({"category": "error", "title": f"{row['colab_name']}: stop not confirmed",
-                            "description": "It may still be billing - see Needs attention"})
+                out.append({"category": "error", "title": f"{row['colab_name']}：停止未确认",
+                            "description": "可能仍在计费，请查看“需要处理”"})
             elif detail.get("to") in TOAST_STATES:
                 cat, text = TOAST_STATES[detail["to"]]
-                reason = f" ({detail['stop_reason']})" if detail.get("stop_reason") else ""
+                code = detail.get("stop_reason")
+                reason = f"（{STOP_REASONS.get(code, code)}）" if code else ""
                 out.append({"category": cat, "title": f"{row['colab_name']} {text}{reason}", "description": ""})
         return {"last": rows[-1]["id"] if len(rows) == 20 else last, "toasts": out}
 
@@ -479,9 +484,9 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
                 cu_cap=float(form["cu_cap"]) if form.get("cu_cap") else None, confirm=form.get("confirm") == "yes",
             )
         except ValueError as exc:
-            return JSONResponse({"error": f"check the form: {exc}"}, 409)
+            return JSONResponse({"error": f"请检查表单：{exc}"}, 409)
         if not req.name:
-            return JSONResponse({"error": "give the session a name"}, 409)
+            return JSONResponse({"error": "请为会话命名"}, 409)
         sid, err = await refused(sup.create, req)
         if err:
             return err
@@ -496,22 +501,22 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         name = row["colab_name"] if row else f"#{sid}"
         if action == "stop":
             _, err = await refused(sup.stop, sid, "user")
-            msg = ("info", f"Stopping {name}")
+            msg = ("info", f"正在停止 {name}")
         elif action == "abandon":
             _, err = await refused(sup.abandon, sid)
-            msg = ("warning", f"Abandoned {name}", "If a VM appears later it will be listed as unmanaged")
+            msg = ("warning", f"已放弃 {name}", "如果之后出现了 VM，它会显示为未托管")
         elif action == "keep":
             _, err = await refused(sup.keep, sid)
-            msg = ("success", f"{name}: idle timer reset")
+            msg = ("success", f"{name}：闲置计时已重置")
         elif action == "gpu-continue":
             _, err = await refused(sup.decide, sid, "continue")
-            msg = ("info", f"{name}: continuing on the assigned GPU")
+            msg = ("info", f"{name}：在分配到的 GPU 上继续")
         elif action == "retry-setup":
             _, err = await refused(sup.decide, sid, "retry")
-            msg = ("info", f"{name}: retrying setup")
+            msg = ("info", f"{name}：正在重试设置")
         elif action == "restart-engine":
             _, err = await refused(sup.reconfigure, sid)
-            msg = ("info", f"{name}: restarting engine")
+            msg = ("info", f"{name}：正在重启推理引擎")
         elif action == "reconfigure":
             try:
                 raw_extra = form.get("extra_args")
@@ -519,12 +524,12 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
                 ctx = int(form["ctx"]) if form.get("ctx") else None
                 projection = _form_projection(form.get("refusal_projection"))
             except ValueError as exc:
-                return JSONResponse({"error": f"check the form: {exc}"}, 409)
+                return JSONResponse({"error": f"请检查表单：{exc}"}, 409)
             _, err = await refused(sup.reconfigure, sid, preset_id=form.get("preset") or None, ctx=ctx,
                                    kv=form.get("kv") or None, extra_args=extra, refusal_projection=projection)
-            msg = ("info", f"{name}: reconfiguring", "The endpoint answers 503 until the new run is ready")
+            msg = ("info", f"{name}：正在重新配置", "新运行就绪前，端点会返回 503")
         else:
-            return JSONResponse({"error": f"unknown action {action!r}"}, 404)
+            return JSONResponse({"error": f"未知操作 {action!r}"}, 404)
         if err:
             return err
         return toast(Response(status_code=204), *msg)
@@ -535,26 +540,26 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         rows = await sup.store.live_sessions()
         for row in rows:
             await sup.stop(row["id"], "user")
-        return toast(Response(status_code=204), "info", f"Stopping {len(rows)} session(s)")
+        return toast(Response(status_code=204), "info", f"正在停止 {len(rows)} 个会话")
 
     @router.post("/ui/actions/external/{name}/stop")
     async def stop_external(request: Request, name: str):
         form = await request.form()
         services.require_confirmation(form.get("confirm") == "yes")
         _, err = await refused(sup.stop_external, name, expected_account=str(form.get("account_id", "")))
-        return err or toast(Response(status_code=204), "info", f"Asked Colab to stop {name}")
+        return err or toast(Response(status_code=204), "info", f"已请求 Colab 停止 {name}")
 
     @router.post("/ui/actions/daily-cap/extend")
     async def extend():
         cap = await sup.extend_daily_cap(5.0)
-        return toast(Response(status_code=204), "success", f"Today's cap is now {cap:.2f} CU")
+        return toast(Response(status_code=204), "success", f"今日上限已调整为 {cap:.2f} CU")
 
     @router.post("/ui/actions/presets/reload")
     async def reload_presets():
         result = sup.reload_presets()
         if isinstance(result, PresetError):
             return JSONResponse({"error": f"presets.toml: {result}"}, 409)
-        return toast(navigate("/models", replace=True), "success", f"Loaded {len(result.presets)} preset(s)")
+        return toast(navigate("/models", replace=True), "success", f"已加载 {len(result.presets)} 个预设")
 
     @router.post("/ui/actions/settings")
     async def save_settings(request: Request):
@@ -572,7 +577,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         # before the swap is processed, hence the rendered body. Replacing the whole dialog
         # matches the soft-navigation refresh and re-initialises the menu's item cache.
         menu = partial(request, "partials/cmdk.html", base=await views.base_context(sup), oob=True)
-        return toast(menu, "success", "Settings saved")
+        return toast(menu, "success", "设置已保存")
 
 
     @router.post("/ui/playground/send")
@@ -583,7 +588,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
     async def playground_models(session_id: int):
         row = await sup.store.session(session_id)
         if not row or row["state"] != "ready":
-            return JSONResponse({"error": "pick a session that is ready"}, 409)
+            return JSONResponse({"error": "请选择一个已就绪的会话"}, 409)
         resp = await http.get(f"http://127.0.0.1:{row['proxy_port']}/v1/models", headers={"User-Agent": PLAYGROUND_UA})
         return JSONResponse({"status": resp.status_code, "body": resp.json()})
 

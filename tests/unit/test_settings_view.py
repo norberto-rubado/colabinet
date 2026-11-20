@@ -40,6 +40,6 @@ async def test_rates_show_latest_valid_system_ram_for_detected_instance_class(st
         base={"balance": None, "burn_rate": 0, "live_count": 0, "alert_count": 0,
               "command_sessions": [], "daily": {"spend": 0, "cap": 10}},
     )
-    assert "System RAM" in page and "54.0 GB" in page and "~13.6 GB" in page
-    assert "Last observed" in page and "Reference" in page
-    assert "Google accounts" in page and "Sign in with Google" in page and "Eligible GPUs" in page
+    assert "系统内存" in page and "54.0 GB" in page and "~13.6 GB" in page
+    assert "最近观测" in page and "参考值" in page
+    assert "Google 账号" in page and "使用 Google 登录" in page and "可用 GPU" in page

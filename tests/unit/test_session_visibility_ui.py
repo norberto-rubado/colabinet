@@ -54,7 +54,7 @@ elements['session-controls'] = { dataset: { state: 'ready' } };
 
 def test_log_pause_prevents_requests_and_resume_refreshes_immediately():
     result = run_frontend(r"""
-const button = { textContent: 'Pause', setAttribute: () => {} };
+const button = { textContent: '暂停', setAttribute: () => {} };
 let prevented = 0;
 cbToggleLogs(button);
 for (const listener of listeners['htmx:beforeRequest'] || []) listener({
@@ -64,7 +64,7 @@ const pausedLabel = button.textContent;
 cbToggleLogs(button);
 process.stdout.write(JSON.stringify({ prevented, pausedLabel, resumedLabel: button.textContent, triggers }));
 """)
-    assert result == {"prevented": 1, "pausedLabel": "Resume", "resumedLabel": "Pause",
+    assert result == {"prevented": 1, "pausedLabel": "继续", "resumedLabel": "暂停",
                       "triggers": ["htmx:abort", "refresh"]}
 
 
@@ -79,7 +79,7 @@ htmx.trigger = (element, name) => {
   triggers.push(name);
   if (element === target && name === 'htmx:abort') aborted = true;
 };
-const button = { textContent: 'Pause', setAttribute: () => {} };
+const button = { textContent: '暂停', setAttribute: () => {} };
 cbToggleLogs(button);
 let prevented = false;
 for (const listener of listeners['htmx:beforeOnLoad'] || []) listener({

@@ -9,14 +9,14 @@ def test_measured_l4_cases():
     q4 = estimate("L4", 16.8, 262144, "q4_0", 65536)
     assert q4.verdict == "tight" and 21 < q4.total_gb < 22.5
     f16 = estimate("L4", 16.8, 262144, "f16", 65536)
-    assert f16.verdict == "spills" and "offload" in f16.message
+    assert f16.verdict == "spills" and "卸载" in f16.message
     assert estimate("L4", 16.8, 32768, "f16", 65536).verdict == "fits"
     assert estimate("A100-80", 16.8, 262144, "f16", 65536).verdict == "fits"
 
 
 def test_unknown_kv_and_cpu():
     assert estimate("L4", 16.8, 8192, "f16", None).verdict == "fits"
-    assert "KV size unknown" in estimate("L4", 16.8, 8192, "f16", None).message
+    assert "KV 大小未知" in estimate("L4", 16.8, 8192, "f16", None).message
     assert estimate("L4", None, 8192, "f16").verdict == "unknown"
     assert estimate("CPU", 1.0, 2048, "f16").verdict == "cpu"
 
@@ -29,8 +29,8 @@ def test_fp8_kv_uses_half_the_fp16_cache_size():
 
 def test_weights_exceeding_vram_spill_even_with_unknown_kv():
     fit = estimate("A100", 111.33, 8192, "f16")
-    assert fit.verdict == "spills" and "offload" in fit.message
-    assert "KV size unknown" in fit.message
+    assert fit.verdict == "spills" and "卸载" in fit.message
+    assert "KV 大小未知" in fit.message
 
 
 async def test_split_hf_size_counts_all_shards():

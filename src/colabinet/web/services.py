@@ -18,14 +18,14 @@ from ..supervisor import CreateRefused
 
 def require_confirmation(value):
     if value is not True:
-        raise CreateRefused('this action spends or stops compute: send {"confirm": true}')
+        raise CreateRefused('此操作会消耗或停止计算资源：请发送 {"confirm": true}')
 
 
 async def read_json(request: Request):
     try:
         return await request.json()
     except ValueError:
-        raise QueryError("invalid JSON body") from None
+        raise QueryError("请求体不是有效的 JSON") from None
 
 
 async def query_metrics(sup, raw):
@@ -34,13 +34,13 @@ async def query_metrics(sup, raw):
 
 async def query_sql(sup, text):
     if not isinstance(text, str):
-        raise QueryError("SQL must be text")
+        raise QueryError("SQL 必须是文本")
     return await asyncio.to_thread(run_sql, sup.store.db.path, text)
 
 
 async def save_query(sup, name, raw):
     if not isinstance(name, str) or not name.strip():
-        raise QueryError("give the query a name")
+        raise QueryError("请为查询命名")
     return await sup.store.save_query(name.strip(), QuerySpec.parse(raw).to_json(), sup.now())
 
 
@@ -60,10 +60,10 @@ async def send_playground(sup, raw):
     try:
         body = PlaygroundBody.model_validate(raw)
     except ValidationError:
-        raise QueryError("invalid playground input") from None
+        raise QueryError("对话测试输入无效") from None
     row = await sup.store.session(body.session_id)
     if not row or row["state"] != "ready":
-        raise CreateRefused("pick a session that is ready")
+        raise CreateRefused("请选择一个已就绪的会话")
     run = await sup.store.current_run(row["id"])
     payload = {"model": run["alias"], "stream": body.stream, "max_tokens": body.max_tokens,
                "messages": [{"role": "user", "content": body.prompt}],
@@ -80,13 +80,13 @@ async def send_playground(sup, raw):
             try:
                 data = response.json()
             except ValueError:
-                data = {"error": "upstream returned a non-JSON response"}
+                data = {"error": "上游返回了非 JSON 响应"}
             return JSONResponse({"status": response.status_code, "total_ms": (time.time() - start) * 1000,
                                  "body": data, "request": payload})
         request = sup.http.build_request("POST", url, json=payload, headers=headers)
         upstream = await sup.http.send(request, stream=True)
     except httpx.HTTPError:
-        raise CreateRefused("session proxy is not reachable") from None
+        raise CreateRefused("无法连接会话代理") from None
 
     async def relay():
         try:

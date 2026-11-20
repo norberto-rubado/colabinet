@@ -1,14 +1,14 @@
 {% from "macros.html" import empty %}
 {% if rows %}
 <div class="table-container"><table class="table">
-<caption class="cb-visually-hidden">Requests to this session</caption>
-  <thead><tr><th>Time</th><th>Client</th><th>Path</th><th>Status</th><th class="cb-num">In</th><th class="cb-num">Cached</th><th class="cb-num">Out</th><th class="cb-num">Gen t/s</th><th class="cb-num">Prefill t/s</th><th class="cb-num">TTFT</th><th class="cb-num">Total</th><th>Source</th></tr></thead>
+<caption class="cb-visually-hidden">发往此会话的请求</caption>
+  <thead><tr><th>时间</th><th>客户端</th><th>路径</th><th>状态</th><th class="cb-num">输入</th><th class="cb-num">缓存</th><th class="cb-num">输出</th><th class="cb-num">生成 t/s</th><th class="cb-num">预填充 t/s</th><th class="cb-num">首 token 延迟</th><th class="cb-num">总耗时</th><th>来源</th></tr></thead>
   <tbody>{% for q in rows %}
-    <tr data-cb-key="request-{{ q.id }}"><td class="cb-port">{{ q.ts | when }}</td><td class="cb-truncate" title="{{ q.client }}">{{ q.client or '-' }}</td><td><code>{{ q.path }}</code>{% if q.stream %} <span class="badge" data-tone="neutral">stream</span>{% endif %}</td>
+    <tr data-cb-key="request-{{ q.id }}"><td class="cb-port">{{ q.ts | when }}</td><td class="cb-truncate" title="{{ q.client }}">{{ q.client or '-' }}</td><td><code>{{ q.path }}</code>{% if q.stream %} <span class="badge" data-tone="neutral">流式</span>{% endif %}</td>
       <td><span class="badge" data-tone="{{ 'danger' if q.status >= 400 else 'success' }}" title="{{ q.error_short or '' }}">{{ q.status }}</span></td>
       <td class="cb-num">{{ q.prompt_tokens | num }}</td><td class="cb-num">{{ q.cached_tokens | num }}</td><td class="cb-num">{{ q.completion_tokens | num }}</td>
       <td class="cb-num">{{ q.gen_tps | num(1) }}</td><td class="cb-num">{{ q.prefill_tps | num(0) }}</td>
       <td class="cb-num">{{ (q.ttft_ms / 1000) | num(2) if q.ttft_ms is not none else '-' }}</td><td class="cb-num">{{ (q.total_ms / 1000) | num(2) if q.total_ms is not none else '-' }}</td><td class="cb-muted">{{ q.tokens_source or '' }}</td></tr>
   {% endfor %}</tbody>
 </table></div>
-{% else %}{{ empty("No requests yet", "Requests through this session's endpoint appear here with their timings.", "activity") }}{% endif %}
+{% else %}{{ empty("暂无请求", "通过此会话端点发出的请求及其耗时会显示在这里。", "activity") }}{% endif %}

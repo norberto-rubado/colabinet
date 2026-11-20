@@ -51,28 +51,28 @@ def estimate(gpu_class: str, weights_gb: float | None, ctx: int, kv: str, bytes_
              mmproj_gb: float = 0.0, mmproj_gpu: bool = False, overhead_gb: float = OVERHEAD_GB) -> Fit:
     vram = VRAM_GB.get(gpu_class, 0.0)
     if vram == 0:
-        return Fit("cpu", None, None, 0.0, "CPU runtime: runs on the CPU (fine for tests, slow for real models)")
+        return Fit("cpu", None, None, 0.0, "CPU 运行时：在 CPU 上运行（适合测试，运行真实模型会很慢）")
     if weights_gb is None:
-        return Fit("unknown", None, None, vram, "model size unknown")
+        return Fit("unknown", None, None, vram, "模型大小未知")
     kv_size = kv_gb(ctx, kv, bytes_per_token_f16)
     total = weights_gb + (kv_size or 0.0) + (mmproj_gb if mmproj_gpu else 0.0) + overhead_gb
-    parts = f"{weights_gb:.1f} GB weights"
+    parts = f"权重 {weights_gb:.1f} GB"
     if kv_size is not None:
-        parts += f" + {kv_size:.1f} GB KV ({ctx // 1024}K, {kv})"
+        parts += f" + KV {kv_size:.1f} GB（{ctx // 1024}K，{kv}）"
     if mmproj_gpu and mmproj_gb:
-        parts += f" + {mmproj_gb:.1f} GB vision"
-    parts += f" + ~{overhead_gb} GB overhead ≈ {total:.1f} of {vram:g} GB"
+        parts += f" + 视觉 {mmproj_gb:.1f} GB"
+    parts += f" + 开销约 {overhead_gb} GB ≈ {total:.1f} / {vram:g} GB"
     if kv_size is None:
         if total > vram:
-            return Fit("spills", total, None, vram, f"{parts}: requires CPU offload; KV size unknown for this model")
+            return Fit("spills", total, None, vram, f"{parts}：需要 CPU 卸载；此模型的 KV 大小未知")
         verdict = "tight" if weights_gb + overhead_gb > TIGHT * vram else "fits"
-        return Fit(verdict, total, None, vram, f"{parts}; KV size unknown for this model, so check the context")
+        return Fit(verdict, total, None, vram, f"{parts}；此模型的 KV 大小未知，请检查上下文长度")
     if total > vram:
-        return Fit("spills", total, kv_size, vram, f"{parts}: llama.cpp will offload layers to the CPU (much slower; "
-                   "try a smaller KV type or context)")
+        return Fit("spills", total, kv_size, vram, f"{parts}：llama.cpp 会把部分层卸载到 CPU（会慢很多；"
+                   "可尝试更小的 KV 类型或上下文）")
     if total > TIGHT * vram:
-        return Fit("tight", total, kv_size, vram, f"{parts}: tight, but it fits")
-    return Fit("fits", total, kv_size, vram, f"{parts}: fits")
+        return Fit("tight", total, kv_size, vram, f"{parts}：偏紧，但能放下")
+    return Fit("fits", total, kv_size, vram, f"{parts}：能放下")
 
 
 async def hf_file_gb(client: httpx.AsyncClient, repo: str, path: str, revision: str = "main") -> float | None:

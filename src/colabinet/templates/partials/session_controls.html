@@ -1,16 +1,16 @@
 {% from "macros.html" import icon, state_badge, nav_attrs %}
 {% set recovery = session.state in ('ready', 'engine_down', 'setup_failed') %}
 <div id="session-controls" class="cb-row" data-state="{{ session.state }}" hx-get="/ui/sessions/{{ session.id }}/controls" hx-trigger="every 2s" hx-swap="cb-patch-outer">
-  {% if session.state == 'ready' %}<a id="session-action-playground" class="btn" data-size="sm" data-variant="outline" href="/playground?session={{ session.id }}" {{ nav_attrs() }}>{{ icon('playground') }}Playground</a>{% endif %}
-  {% if session.state in ('ready', 'engine_down', 'tunnelling') and session.idle_min %}<button id="session-action-keep" class="btn" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/keep" hx-swap="none" title="Reset the idle-stop timer">{{ icon('timer') }}Extend idle</button>{% endif %}
+  {% if session.state == 'ready' %}<a id="session-action-playground" class="btn" data-size="sm" data-variant="outline" href="/playground?session={{ session.id }}" {{ nav_attrs() }}>{{ icon('playground') }}对话测试</a>{% endif %}
+  {% if session.state in ('ready', 'engine_down', 'tunnelling') and session.idle_min %}<button id="session-action-keep" class="btn" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/keep" hx-swap="none" title="重置闲置自动停止计时器">{{ icon('timer') }}延长闲置</button>{% endif %}
   {% if recovery %}
-  <div class="cb-btn-group" role="group" aria-label="Change or recover the engine">
-    <button id="session-action-reconfigure" class="btn" data-size="sm" data-variant="outline" onclick="document.getElementById('reconfigure-dialog').showModal()">{{ icon('sliders') }}Reconfigure…</button>
-    <button id="session-action-restart" class="btn cb-recovery" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/restart-engine" hx-vals='{"confirm":"yes"}' hx-confirm="Restart the engine on this billing VM?" hx-swap="none">{{ icon('restart') }}Restart engine</button>
-    {% if session.state == 'setup_failed' %}<button id="session-action-retry" class="btn cb-recovery" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/retry-setup" hx-vals='{"confirm":"yes"}' hx-confirm="Retry setup on this billing VM?" hx-swap="none">{{ icon('refresh') }}Retry setup</button>{% endif %}
+  <div class="cb-btn-group" role="group" aria-label="更改或恢复推理引擎">
+    <button id="session-action-reconfigure" class="btn" data-size="sm" data-variant="outline" onclick="document.getElementById('reconfigure-dialog').showModal()">{{ icon('sliders') }}重新配置…</button>
+    <button id="session-action-restart" class="btn cb-recovery" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/restart-engine" hx-vals='{"confirm":"yes"}' hx-confirm="要在这台正在计费的 VM 上重启推理引擎吗？" hx-swap="none">{{ icon('restart') }}重启推理引擎</button>
+    {% if session.state == 'setup_failed' %}<button id="session-action-retry" class="btn cb-recovery" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/retry-setup" hx-vals='{"confirm":"yes"}' hx-confirm="要在这台正在计费的 VM 上重试设置吗？" hx-swap="none">{{ icon('refresh') }}重试设置</button>{% endif %}
   </div>
   {% endif %}
-  {% if session.state == 'gpu_mismatch' %}<button id="session-action-gpu-continue" class="btn cb-recovery" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/gpu-continue" hx-vals='{"confirm":"yes"}' hx-confirm="Continue setup on the assigned GPU? This VM is billing." hx-swap="none">{{ icon('play') }}Continue on this GPU</button>{% endif %}
-  {% if session.state not in ('stopped', 'failed', 'stopping') %}<button id="session-action-stop" class="btn" data-size="sm" data-variant="destructive" onclick="cbConfirmStop({{ session.id }}, {{ session.colab_name | tojson | forceescape }})">{{ icon('stop') }}Stop</button>{% endif %}
+  {% if session.state == 'gpu_mismatch' %}<button id="session-action-gpu-continue" class="btn cb-recovery" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/gpu-continue" hx-vals='{"confirm":"yes"}' hx-confirm="要在已分配的 GPU 上继续设置吗？这台 VM 正在计费。" hx-swap="none">{{ icon('play') }}在此 GPU 上继续</button>{% endif %}
+  {% if session.state not in ('stopped', 'failed', 'stopping') %}<button id="session-action-stop" class="btn" data-size="sm" data-variant="destructive" onclick="cbConfirmStop({{ session.id }}, {{ session.colab_name | tojson | forceescape }})">{{ icon('stop') }}停止</button>{% endif %}
 </div>
 {% if refresh_badge %}<span id="session-state" hx-swap-oob="cb-patch">{{ state_badge(session.state, session.stop_unconfirmed) }}</span>{% endif %}

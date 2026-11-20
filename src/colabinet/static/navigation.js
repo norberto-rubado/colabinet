@@ -21,7 +21,7 @@
     if (request !== activeRequest) return;
     loading(null);
     history.replaceState(history.state, '', currentPath);
-    cbToast('error', 'Could not restore page', 'Try opening the page again.');
+    cbToast('error', '无法恢复页面', '请重新打开该页面。');
   };
   const enter = () => {
     const page = view().querySelector('[data-page]');
@@ -62,7 +62,7 @@
     if (event.detail.target !== view() || !event.detail.shouldSwap) return;
     if (!parsePage(event.detail.serverResponse)) {
       event.detail.shouldSwap = false;
-      cbToast('error', 'Could not open page', 'The server did not return a console page.');
+      cbToast('error', '无法打开页面', '服务器未返回控制台页面。');
       return;
     }
     document.dispatchEvent(new CustomEvent('cb:pageLeave', { detail: { source: event.detail.requestConfig.elt } }));

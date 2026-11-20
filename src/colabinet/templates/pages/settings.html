@@ -1,49 +1,49 @@
 {% extends "base.html" %}
 {% from "macros.html" import icon, card_title %}
-{% block title %}Settings{% endblock %}
-{% block crumbs %}<h1>Settings</h1>{% endblock %}
+{% block title %}设置{% endblock %}
+{% block crumbs %}<h1>设置</h1>{% endblock %}
 {% block content %}
 {% set config = st.config %}
 {% include "partials/google_account.html" %}
 <div class="cb-grid-2">
-  <section class="card"><header>{{ card_title('Defaults & guards', 'shield') }}<p>Limits that stop spending, applied to every new session.</p></header>
+  <section class="card"><header>{{ card_title('默认值与保护', 'shield') }}<p>用于停止扣点的限制，应用于每个新建会话。</p></header>
     <section><form class="form" hx-post="/ui/actions/settings" hx-swap="none"><div class="cb-form-grid cb-form-grid--auto">
-      <div class="field"><label class="label" for="s-cap">Daily CU cap</label><input class="input" id="s-cap" name="daily_cap_cu" type="number" step="0.5" min="0" value="{{ config.daily_cap_cu }}"><p class="cb-muted">0 turns the cap off</p></div>
-      <div class="field"><label class="label" for="s-low">Low-balance warning</label><input class="input" id="s-low" name="low_balance_cu" type="number" step="1" min="0" value="{{ config.low_balance_cu }}"><p class="cb-muted">CU remaining on the account</p></div>
-      <div class="field"><label class="label" for="s-idle">Default idle stop</label><input class="input" id="s-idle" name="idle_min_default" type="number" min="0" value="{{ config.idle_min_default }}"><p class="cb-muted">Minutes without use, 0 disables</p></div>
-      <fieldset class="field cb-span-4 cb-gpu-options"><legend class="label">Eligible GPUs</legend>
+      <div class="field"><label class="label" for="s-cap">每日 CU 上限</label><input class="input" id="s-cap" name="daily_cap_cu" type="number" step="0.5" min="0" value="{{ config.daily_cap_cu }}"><p class="cb-muted">0 表示不设上限</p></div>
+      <div class="field"><label class="label" for="s-low">余额不足提醒</label><input class="input" id="s-low" name="low_balance_cu" type="number" step="1" min="0" value="{{ config.low_balance_cu }}"><p class="cb-muted">账户剩余 CU 低于此值时提醒</p></div>
+      <div class="field"><label class="label" for="s-idle">默认闲置自动停止</label><input class="input" id="s-idle" name="idle_min_default" type="number" min="0" value="{{ config.idle_min_default }}"><p class="cb-muted">无使用的分钟数，0 表示关闭</p></div>
+      <fieldset class="field cb-span-4 cb-gpu-options"><legend class="label">可用 GPU</legend>
         <div class="cb-chips">{% for gpu_type in st.gpu_types %}
           <label class="cb-checkbox"><input class="input" type="checkbox" name="eligible_gpus" value="{{ gpu_type }}" {% if gpu_type in st.eligible_gpus %}checked{% endif %}> {{ gpu_type }}</label>
         {% endfor %}</div>
-        <p class="cb-muted">A100 and T4 include their high-memory variants. CPU is always available.</p>
+        <p class="cb-muted">A100 和 T4 包含其高内存版本。CPU 始终可用。</p>
       </fieldset>
-      <div class="cb-span-4"><label class="cb-setting-row"><div><strong>macOS notifications</strong><span>Show a notification for critical alerts</span></div><input type="checkbox" role="switch" class="input" name="notify" aria-label="macOS notifications for critical alerts" {% if config.notify %}checked{% endif %}></label></div>
-    </div><div class="cb-row cb-form-footer"><button class="btn" type="submit">{{ icon('save') }}Save</button></div></form></section>
+      <div class="cb-span-4"><label class="cb-setting-row"><div><strong>macOS 通知</strong><span>出现重要提醒时显示系统通知</span></div><input type="checkbox" role="switch" class="input" name="notify" aria-label="重要提醒的 macOS 通知" {% if config.notify %}checked{% endif %}></label></div>
+    </div><div class="cb-row cb-form-footer"><button class="btn" type="submit">{{ icon('save') }}保存</button></div></form></section>
   </section>
-  <section class="card"><header>{{ card_title('Colab', 'terminal') }}<p>How this console reaches Colab. Fixed when colabinet starts.</p></header><section><dl class="cb-kv">
-    <dt>CLI</dt><dd><code class="cb-path">{{ st.colab_bin }}</code> · {{ st.cli_version or 'version unknown' }}{% if st.cli_version %} <span class="badge" data-tone="success">ok</span>{% endif %}</dd>
-    <dt>Google authentication</dt><dd>{{ 'Google account OAuth2' if st.colab_auth == 'oauth2' else 'Application Default Credentials (ADC)' }}</dd>
-    <dt>SSH key</dt><dd><code class="cb-path">{{ st.ssh_key }}</code> {% if st.ssh_key_ok %}<span class="badge" data-tone="success">present</span>{% else %}<span class="badge" data-tone="danger">missing (ed25519 needed)</span>{% endif %}</dd>
-    <dt>HF token</dt><dd>{{ 'set via HF_TOKEN (not stored)' if st.hf_token else 'not set (fine for public models)' }}</dd>
-    <dt>Database</dt><dd><code class="cb-path">{{ st.db_path }}</code> · {{ st.db_mb }} MB</dd>
-    <dt>Setup limit</dt><dd>{{ st.setup_limit_s | dur }}</dd>
-    <dt>Failure grace</dt><dd>{{ st.grace_s | dur }}</dd>
-    <dt>Proxy ports</dt><dd>from {{ st.proxy_port_start }} · hidden {{ st.hidden_port_range[0] }}–{{ st.hidden_port_range[1] }}</dd>
-    <dt>On quit</dt><dd>{{ 'stop every managed session (--stop-on-exit)' if st.stop_on_exit else 'leave sessions running and billing (start with --stop-on-exit to stop managed sessions on quit)' }}</dd>
+  <section class="card"><header>{{ card_title('Colab', 'terminal') }}<p>本控制台连接 Colab 的方式，在 colabinet 启动时确定。</p></header><section><dl class="cb-kv">
+    <dt>CLI</dt><dd><code class="cb-path">{{ st.colab_bin }}</code> · {{ st.cli_version or '版本未知' }}{% if st.cli_version %} <span class="badge" data-tone="success">正常</span>{% endif %}</dd>
+    <dt>Google 认证</dt><dd>{{ 'Google 账号 OAuth2' if st.colab_auth == 'oauth2' else '应用默认凭据（ADC）' }}</dd>
+    <dt>SSH 密钥</dt><dd><code class="cb-path">{{ st.ssh_key }}</code> {% if st.ssh_key_ok %}<span class="badge" data-tone="success">已存在</span>{% else %}<span class="badge" data-tone="danger">缺失（需要 ed25519）</span>{% endif %}</dd>
+    <dt>HF token</dt><dd>{{ '已通过 HF_TOKEN 设置（不保存）' if st.hf_token else '未设置（公开模型无需设置）' }}</dd>
+    <dt>数据库</dt><dd><code class="cb-path">{{ st.db_path }}</code> · {{ st.db_mb }} MB</dd>
+    <dt>安装时限</dt><dd>{{ st.setup_limit_s | dur }}</dd>
+    <dt>失败宽限期</dt><dd>{{ st.grace_s | dur }}</dd>
+    <dt>代理端口</dt><dd>从 {{ st.proxy_port_start }} 起 · 隐藏端口 {{ st.hidden_port_range[0] }}–{{ st.hidden_port_range[1] }}</dd>
+    <dt>退出时</dt><dd>{{ '停止所有托管会话（--stop-on-exit）' if st.stop_on_exit else '会话保持运行并继续计费（使用 --stop-on-exit 启动可在退出时停止托管会话）' }}</dd>
   </dl></section></section>
 </div>
-<section class="card"><header>{{ card_title('GPU rates', 'coins') }}<p>CU per hour: seeded from measurements, then learned from <code>colab usage</code> after each create.</p></header>
+<section class="card"><header>{{ card_title('GPU 费率', 'coins') }}<p>每小时 CU：初始值来自实测，之后每次创建后从 <code>colab usage</code> 学习更新。</p></header>
   <section><div class="table-container"><table class="table">
-    <caption class="cb-visually-hidden">GPU rates per class</caption>
-    <thead><tr><th>Class</th><th class="cb-num">VRAM</th><th class="cb-num">System RAM</th><th class="cb-num">CU/h</th><th>Rate source</th><th>Rate updated</th></tr></thead>
+    <caption class="cb-visually-hidden">各 GPU 类型费率</caption>
+    <thead><tr><th>类型</th><th class="cb-num">VRAM</th><th class="cb-num">系统内存</th><th class="cb-num">CU/h</th><th>费率来源</th><th>费率更新时间</th></tr></thead>
     <tbody>{% for row in st.rates %}<tr>
       <td><strong>{{ row.gpu }}</strong></td>
       <td class="cb-num">{% if row.vram %}{{ row.vram | num(1) }} GB{% else %}—{% endif %}</td>
       <td class="cb-num">{{ '~' if row.ram_source == 'reference' else '' }}{{ row.ram_gb | num(1) }} GB
-        <small class="cb-ram-source">{{ 'Last observed' if row.ram_source == 'observed' else 'Reference' }}</small>
+        <small class="cb-ram-source">{{ '最近观测' if row.ram_source == 'observed' else '参考值' }}</small>
       </td>
       <td class="cb-num"><strong>{{ row.rate | num(2) }}</strong></td><td><span class="badge" data-tone="{{ 'info' if row.source == 'learned' else 'neutral' }}">{{ row.source }}</span></td><td class="cb-muted">{{ row.updated_at | day }}</td>
     </tr>{% endfor %}</tbody>
-  </table></div><p class="cb-muted cb-resource-note">System RAM is host memory, separate from GPU VRAM. Latest recorded allocations take precedence; ~ values are approximate references and may vary.</p></section>
+  </table></div><p class="cb-muted cb-resource-note">系统内存指主机内存，与 GPU VRAM 分开计算。优先使用最近记录的分配值；带 ~ 的数值为近似参考，可能有所不同。</p></section>
 </section>
 {% endblock %}

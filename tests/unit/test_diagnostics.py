@@ -34,7 +34,7 @@ def test_log_is_bounded_after_redaction_and_keeps_the_final_error():
     raw = 'begin\n' + 'context\n' * 10000 + 'access_token=' + 'private-value-' * 6000 + '\nQuotaError: no GPU'
     output = bounded_diagnostic(raw)
     assert len(output) <= 65536
-    assert 'truncated' in output
+    assert '已截断' in output
     assert output.endswith('QuotaError: no GPU')
     assert 'private-value' not in output
 

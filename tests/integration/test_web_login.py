@@ -115,7 +115,7 @@ async def test_settings_exposes_google_sign_in_and_account_check(login_console):
     _, client, *_ = login_console
     response = await client.get("/settings")
     assert response.status_code == 200
-    assert "Sign in with Google" in response.text
+    assert "使用 Google 登录" in response.text
     assert 'id="google-account"' in response.text
     assert "/ui/actions/auth/check" in response.text
 
@@ -143,7 +143,7 @@ async def test_cached_account_is_checked_in_the_ui(login_console):
     response = await client.post("/ui/actions/auth/check", headers=CSRF)
     assert response.status_code == 200
     markup = await wait_state(client, "connected")
-    assert "reviewer@example.com" in markup and "Open Google sign-in" not in markup
+    assert "reviewer@example.com" in markup and "打开 Google 登录" not in markup
 
 
 async def connect(client, code="fake-code"):
@@ -163,7 +163,7 @@ async def test_two_accounts_switch_balances_and_logout_only_active_credentials(l
     second = app.state.google_login.snapshot()["active_id"]
     second_cli = sup.cli
     assert first != second and "reviewer@example.com" in markup and "other@example.com" in markup
-    assert "Add account" in markup and "Log out" in markup and "Switch" in markup
+    assert "添加账号" in markup and "退出登录" in markup and "切换" in markup
     assert sup.usage.balance == 25 and not cached.exists()
     assert first_cli.profile != second_cli.profile
     assert first_cli.profile.joinpath("token.json").exists()
@@ -227,7 +227,7 @@ async def test_account_changes_require_confirmed_stopped_sessions(login_console,
     for action in ("start", "logout", "switch"):
         data = {} if action == "start" else {"account_id": account_id}
         response = await client.post(f"/ui/actions/auth/{action}", data=data, headers=CSRF)
-        assert response.status_code == 409 and "Stop" in response.json()["error"]
+        assert response.status_code == 409 and "停止所有托管会话" in response.json()["error"]
     assert app.state.google_login.snapshot()["active_id"] == account_id
 
 
@@ -387,7 +387,7 @@ async def test_stale_external_stop_cannot_operate_on_new_account(login_console):
     before = journal.read_text()
     response = await client.post("/ui/actions/external/reused-name/stop",
                                  data={"confirm": "yes", "account_id": first}, headers=CSRF)
-    assert response.status_code == 409 and "account changed" in response.json()["error"]
+    assert response.status_code == 409 and "当前账号已变更" in response.json()["error"]
     assert journal.read_text() == before
 
 
@@ -570,7 +570,7 @@ async def test_timeout_cleans_up_and_offers_retry(login_console):
     response = await client.post("/ui/actions/auth/start", headers=CSRF)
     assert response.status_code == 200
     markup = await wait_state(client, "failed")
-    assert "expired" in markup and "Sign in with Google" in markup
+    assert "已过期" in markup and "使用 Google 登录" in markup
     with pytest.raises(ProcessLookupError):
         os.kill(int(pid.read_text()), 0)
 
@@ -591,7 +591,7 @@ async def test_upstream_failure_does_not_echo_cli_secrets(login_console, monkeyp
     await client.post("/ui/actions/auth/code", data={"flow_id": flow_id(markup), "code": "fake-code"}, headers=CSRF)
     markup = await wait_state(client, "failed")
     assert "secret-do-not-show" not in markup and "secret-token" not in markup
-    assert "Sign in with Google" in markup
+    assert "使用 Google 登录" in markup
 
 
 @pytest.mark.parametrize("url", ["https://evil.example/oauth", "https://accounts.google.com.evil.example/oauth",
@@ -602,7 +602,7 @@ async def test_only_google_authorization_urls_are_rendered(login_console, monkey
     response = await client.post("/ui/actions/auth/start", headers=CSRF)
     assert response.status_code == 200
     markup = await wait_state(client, "failed")
-    assert url not in markup and "Open Google sign-in" not in markup
+    assert url not in markup and "打开 Google 登录" not in markup
 
 
 @pytest.mark.parametrize("action", ["start", "check", "code", "cancel", "switch", "logout"])
@@ -620,7 +620,7 @@ async def test_adc_mode_explains_account_setup_and_prevents_oauth_login(login_co
     app.state.google_login.mode = "adc"
     response = await client.get("/settings")
     assert "gcloud auth application-default login" in response.text
-    assert "Sign in with Google" not in response.text
+    assert "使用 Google 登录" not in response.text
     assert (await client.post("/ui/actions/auth/start", headers=CSRF)).status_code == 409
 
 
@@ -700,11 +700,11 @@ await wait(`document.getElementById('google-account').dataset.authState === 'con
 await evaluate(`document.querySelector('[data-account-email="reviewer@example.com"] button').click(); true`);
 await wait(`document.getElementById('google-account-status').textContent.includes('reviewer@example.com')`);
 const switched = await evaluate(`document.querySelector('[data-account-email="reviewer@example.com"]').textContent
-  .includes('Current account')`);
+  .includes('当前账号')`);
 await evaluate(`document.getElementById('google-account-logout').click(); true`);
 await wait(`document.getElementById('google-account').dataset.authState === 'signed_out'`);
 const loggedOut = await evaluate(`document.querySelector('[data-account-email="reviewer@example.com"]').textContent
-  .includes('Logged out') && !!document.querySelector('[data-account-email="other@example.com"] button')`);
+  .includes('已退出') && !!document.querySelector('[data-account-email="other@example.com"] button')`);
 await evaluate(`document.querySelector('[data-account-email="other@example.com"] button').click(); true`);
 await wait(`document.getElementById('google-account-status').textContent.includes('other@example.com')`);
 await evaluate(`document.querySelector('[data-account-email="reviewer@example.com"] button').click(); true`);

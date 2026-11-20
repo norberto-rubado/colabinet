@@ -95,7 +95,7 @@ async def test_crash_after_assign_raises_orphan_alert(world):
 async def test_refuses_a_name_that_is_already_listed(world):
     proc = await world.sup.cli.spawn_new("llm", "CPU")
     await proc.communicate()
-    with pytest.raises(CreateRefused, match="already listed"):
+    with pytest.raises(CreateRefused, match="已存在名为"):
         await world.sup.create(world.request())
     await world.sup.cli.stop("llm")
 
@@ -199,7 +199,7 @@ async def test_daily_cap_stops_everything_and_blocks_creates(world):
     await world.store.set_setting("daily_cap_cu", "0.00001")
     row = await world.wait_state(sid, "stopped")
     assert row["stop_reason"] == "daily_cap"
-    with pytest.raises(CreateRefused, match="daily cap"):
+    with pytest.raises(CreateRefused, match="每日上限"):
         await world.sup.create(world.request(name="llm2"))
     await world.sup.extend_daily_cap(5)
     assert await world.sup.cap_today() == pytest.approx(5.00001)
@@ -336,7 +336,7 @@ async def test_settings_persist_and_feed_defaults(world):
     assert (values["idle_min_default"], values["daily_cap_cu"], values["notify"]) == (7, 4.5, False)
     assert world.sup.alerts.notify_enabled is False
     assert await world.sup.cap_today() == 4.5
-    with pytest.raises(CreateRefused, match="negative"):
+    with pytest.raises(CreateRefused, match="不能为负数"):
         await world.sup.update_settings(daily_cap_cu=-1)
     sid = await world.sup.create(world.request())
     assert (await world.store.session(sid))["idle_min"] == 7

@@ -102,7 +102,7 @@ async def test_every_palette_inline_handler_is_parseable(console):
 async def test_palette_stop_opens_the_confirmation_for_that_session(console):
     world, _, _, sid = console
     result = await browse(console, r"""
-const clicked = await clickCommand('Stop llm');
+const clicked = await clickCommand('停止 llm');
 const opened = await settled(`document.getElementById('stop-dialog').open`);
 return { clicked, opened,
   menuClosed: await evaluate(`!document.getElementById('cmdk').open`),
@@ -114,16 +114,16 @@ return { clicked, opened,
     assert result["opened"] is True
     assert result["menuClosed"] is True
     assert result["name"] == "llm"
-    assert "Stop llm?" == result["title"]
+    assert "要停止 llm 吗？" == result["title"]
     assert result["post"] == f"/ui/actions/sessions/{sid}/stop"
 
 
 async def test_cancelling_the_palette_stop_keeps_the_session_live(console):
     world, _, _, sid = console
     result = await browse(console, r"""
-await clickCommand('Stop llm');
+await clickCommand('停止 llm');
 await settled(`document.getElementById('stop-dialog').open`);
-const cancelled = await clickDialogButton('stop-dialog', 'Cancel');
+const cancelled = await clickDialogButton('stop-dialog', '取消');
 const closed = await settled(`!document.getElementById('stop-dialog').open`);
 return { cancelled, closed, state: await evaluate(`document.getElementById('stop-name').textContent`) };
 """)
@@ -137,9 +137,9 @@ return { cancelled, closed, state: await evaluate(`document.getElementById('stop
 async def test_confirming_the_palette_stop_stops_the_session(console):
     world, _, _, sid = console
     result = await browse(console, r"""
-await clickCommand('Stop llm');
+await clickCommand('停止 llm');
 await settled(`document.getElementById('stop-dialog').open`);
-const confirmed = await clickDialogButton('stop-dialog', 'Stop');
+const confirmed = await clickDialogButton('stop-dialog', '停止');
 return { confirmed, closed: await settled(`!document.getElementById('stop-dialog').open`) };
 """)
     assert result["confirmed"] == "clicked"

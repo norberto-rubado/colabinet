@@ -1,38 +1,38 @@
 {% extends "base.html" %}
 {% from "macros.html" import icon, empty, card_title, nav_attrs %}
-{% block title %}Playground{% endblock %}
-{% block crumbs %}<h1>Playground</h1><span class="cb-page-note">Sent through the session's own proxy port, like any client.</span>{% endblock %}
+{% block title %}对话测试{% endblock %}
+{% block crumbs %}<h1>对话测试</h1><span class="cb-page-note">与普通客户端一样，通过会话自己的代理端口发送。</span>{% endblock %}
 {% block content %}
 {% if sessions %}
 <div class="cb-playground">
   <section class="card">
-    <header>{{ card_title('Request', 'send') }}<p>One message, no history.</p></header>
+    <header>{{ card_title('请求', 'send') }}<p>单条消息，不带历史记录。</p></header>
     <section class="cb-form-grid cb-pg-grid">
-      <div class="field cb-span-4"><label class="label" for="pg-session">Session</label>
+      <div class="field cb-span-4"><label class="label" for="pg-session">会话</label>
         <select class="select" id="pg-session">{% for session in sessions %}<option value="{{ session.id }}"
           data-endpoint="http://127.0.0.1:{{ session.proxy_port }}/v1" data-model="{{ session.run.alias if session.run else '' }}"
           {% if session.id == selected %}selected{% endif %}>{{ session.colab_name }} · :{{ session.proxy_port }} · {{ session.gpu_class }} · {{ session.run.alias if session.run else '' }}</option>{% endfor %}</select></div>
-      <div class="field"><label class="label" for="pg-thinking">Thinking</label>
-        <select class="select" id="pg-thinking"><option value="none">none</option><option value="low">low</option><option value="medium">medium</option><option value="high">high (xhigh)</option></select></div>
-      <div class="field"><label class="label" for="pg-max">Max tokens</label><input class="input" id="pg-max" type="number" value="256" min="1"></div>
-      <div class="field"><label class="label" for="pg-stream">Stream</label>
-        <div class="cb-switch-row"><label class="cb-switch"><input type="checkbox" role="switch" class="input" id="pg-stream" checked> stream the reply</label></div></div>
-      <div class="field cb-span-4"><label class="label" for="pg-prompt">Prompt</label><textarea class="textarea" id="pg-prompt" rows="6">Say hello in five words.</textarea></div>
+      <div class="field"><label class="label" for="pg-thinking">思考</label>
+        <select class="select" id="pg-thinking"><option value="none">无</option><option value="low">低</option><option value="medium">中</option><option value="high">高（xhigh）</option></select></div>
+      <div class="field"><label class="label" for="pg-max">最大 token 数</label><input class="input" id="pg-max" type="number" value="256" min="1"></div>
+      <div class="field"><label class="label" for="pg-stream">流式</label>
+        <div class="cb-switch-row"><label class="cb-switch"><input type="checkbox" role="switch" class="input" id="pg-stream" checked> 流式输出回复</label></div></div>
+      <div class="field cb-span-4"><label class="label" for="pg-prompt">提示词</label><textarea class="textarea" id="pg-prompt" rows="6">用五个字打个招呼。</textarea></div>
     </section>
     <footer>
       <div class="cb-send-row">
-        <button class="btn" id="pg-send" onclick="cbPlaygroundSend()">{{ icon('send') }}Send</button>
-        <span class="cb-send-hint"><kbd class="kbd">⌘</kbd> <kbd class="kbd">↵</kbd> to send</span>
+        <button class="btn" id="pg-send" onclick="cbPlaygroundSend()">{{ icon('send') }}发送</button>
+        <span class="cb-send-hint"><kbd class="kbd">⌘</kbd> <kbd class="kbd">↵</kbd> 发送</span>
       </div>
       <button class="btn" data-size="sm" data-variant="ghost" onclick="cbPlaygroundModels()">{{ icon('code') }}GET /v1/models</button>
-      <label class="cb-switch cb-muted cb-right"><input type="checkbox" class="input" id="pg-raw"> show raw request / response</label>
+      <label class="cb-switch cb-muted cb-right"><input type="checkbox" class="input" id="pg-raw"> 显示原始请求 / 响应</label>
     </footer>
   </section>
   <section class="card">
-    <header>{{ card_title('Reply', 'bot') }}<p>Streams in as the model answers.</p></header>
+    <header>{{ card_title('回复', 'bot') }}<p>模型作答时实时流式显示。</p></header>
     <section class="cb-reply">
-      <details id="pg-reasoning-box" hidden><summary class="cb-muted">Thinking</summary><pre class="cb-log" id="pg-reasoning"></pre></details>
-      <div id="pg-hint" class="cb-reply-empty">{{ icon('playground') }}<span>Send a prompt to see the reply here.</span></div>
+      <details id="pg-reasoning-box" hidden><summary class="cb-muted">思考过程</summary><pre class="cb-log" id="pg-reasoning"></pre></details>
+      <div id="pg-hint" class="cb-reply-empty">{{ icon('playground') }}<span>发送提示词后，回复会显示在这里。</span></div>
       <div id="pg-output" class="cb-output"></div>
       <div id="pg-metrics" class="cb-row cb-metrics"></div>
       <pre id="pg-raw-out" class="cb-log" hidden></pre>
@@ -40,28 +40,28 @@
   </section>
 </div>
 <section class="card" id="pg-client-examples">
-  <header>{{ card_title('Use outside the Playground', 'terminal') }}
-    <p>Copy an example using the selected session, prompt, thinking level and token limit. The reply arrives in one response, without streaming.
-      Run it on the machine running colabinet; no API key or extra Python packages are required.</p>
+  <header>{{ card_title('在对话测试之外使用', 'terminal') }}
+    <p>复制一个使用当前所选会话、提示词、思考等级和 token 上限的示例。回复会一次性返回，不使用流式输出。
+      请在运行 colabinet 的机器上执行；无需 API 密钥，也无需额外的 Python 包。</p>
   </header>
   <section>
-    <p id="pg-examples-error" class="cb-muted" role="status" hidden>Choose a session with a model and a positive whole number for Max tokens.</p>
+    <p id="pg-examples-error" class="cb-muted" role="status" hidden>请选择一个已加载模型的会话，并将“最大 token 数”设为正整数。</p>
     <div class="cb-row cb-example-controls">
       <div class="field cb-example-language">
-        <label class="label" for="pg-example-language">Language</label>
+        <label class="label" for="pg-example-language">语言</label>
         <select class="select" id="pg-example-language" aria-controls="pg-python-panel pg-curl-panel">
           <option value="python">Python 3</option><option value="curl">curl</option>
         </select>
       </div>
-      <button type="button" class="btn cb-right" data-variant="outline" id="pg-copy-example" aria-label="Copy Python example" disabled onclick="cbCopy(document.querySelector('#pg-client-examples pre:not([hidden]) code').textContent, this.getAttribute('aria-label').replace('Copy ', 'Copied '))">{{ icon('copy') }}Copy</button>
+      <button type="button" class="btn cb-right" data-variant="outline" id="pg-copy-example" aria-label="复制 Python 示例" disabled onclick="cbCopy(document.querySelector('#pg-client-examples pre:not([hidden]) code').textContent, this.getAttribute('aria-label').replace('复制 ', '已复制 '))">{{ icon('copy') }}复制</button>
     </div>
-    <pre class="cb-log" id="pg-python-panel" role="region" tabindex="0" aria-label="Python example" hidden><code id="pg-python-example"></code></pre>
-    <pre class="cb-log" id="pg-curl-panel" role="region" tabindex="0" aria-label="curl example" hidden><code id="pg-curl-example"></code></pre>
+    <pre class="cb-log" id="pg-python-panel" role="region" tabindex="0" aria-label="Python 示例" hidden><code id="pg-python-example"></code></pre>
+    <pre class="cb-log" id="pg-curl-panel" role="region" tabindex="0" aria-label="curl 示例" hidden><code id="pg-curl-example"></code></pre>
   </section>
 </section>
 {% else %}
 <section class="card">
-  {% call empty("No session is ready", "Create a session and wait until it is ready, then test it here.", "playground") %}<div class="cb-row"><a class="btn" data-size="sm" href="/new" {{ nav_attrs() }}>{{ icon('plus') }}New session</a><a class="btn" data-size="sm" data-variant="outline" href="/sessions" {{ nav_attrs() }}>View sessions</a></div>{% endcall %}
+  {% call empty("没有就绪的会话", "请先创建会话并等待其就绪，然后在这里测试。", "playground") %}<div class="cb-row"><a class="btn" data-size="sm" href="/new" {{ nav_attrs() }}>{{ icon('plus') }}新建会话</a><a class="btn" data-size="sm" data-variant="outline" href="/sessions" {{ nav_attrs() }}>查看会话</a></div>{% endcall %}
 </section>
 {% endif %}
 {% endblock %}

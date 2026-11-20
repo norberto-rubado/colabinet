@@ -106,9 +106,9 @@
   document.addEventListener('htmx:responseError', (event) => {
     let msg = event.detail.xhr.responseText;
     try { msg = JSON.parse(msg).error || msg; } catch (_) {}
-    cbToast('error', 'Not done', msg);
+    cbToast('error', '操作未完成', msg);
   });
-  document.addEventListener('htmx:sendError', () => cbToast('error', 'colabinet is not reachable', 'Is `colabinet serve` still running?'));
+  document.addEventListener('htmx:sendError', () => cbToast('error', '无法连接 colabinet', '请确认 `colabinet serve` 仍在运行。'));
 
   let lastEvent = -1;
   const pollToasts = async () => {
@@ -120,9 +120,9 @@
     } catch (_) {}
   };
 
-  window.cbCopy = async (text, title = 'Copied') => {
+  window.cbCopy = async (text, title = '已复制') => {
     try { await navigator.clipboard.writeText(text); cbToast('success', title, text.length > 80 ? '' : text); }
-    catch (_) { cbToast('error', 'Could not copy', 'Select the text and copy it manually.'); }
+    catch (_) { cbToast('error', '复制失败', '请选中文本后手动复制。'); }
   };
   window.cbConfirmStop = (id, name) => {
     const dialog = document.getElementById('stop-dialog');
@@ -186,7 +186,7 @@
       card.title = fit.message;
       card.querySelector('.cb-gpu-fit').textContent = fit.label;
       const speed = card.querySelector('.cb-gpu-speed');
-      if (speed) speed.textContent = fit.measured ? `${fit.measured.gen} tok/s measured` : '';
+      if (speed) speed.textContent = fit.measured ? `${fit.measured.gen} tok/s（实测）` : '';
       input.disabled = fit.status === 'blocked' && !input.checked;
     });
     const note = document.getElementById('gpu-note');
@@ -195,7 +195,7 @@
     if (!blocked) return;
     const alternative = document.getElementById('gpu-fit').dataset.suggest;
     const text = document.createElement('span');
-    text.textContent = `${blocked.gpu} cannot run this model with these settings (${blocked.label}).`;
+    text.textContent = `${blocked.gpu} 无法以当前设置运行此模型（${blocked.label}）。`;
     note.replaceChildren(text);
     if (alternative) {
       const use = document.createElement('button');
@@ -203,7 +203,7 @@
       use.className = 'btn';
       use.dataset.size = 'sm';
       use.dataset.variant = 'outline';
-      use.textContent = `Use ${alternative} instead`;
+      use.textContent = `改用 ${alternative}`;
       use.addEventListener('click', () => {
         const radio = form.querySelector(`input[name="gpu"][value="${alternative}"]`);
         radio.disabled = false;
@@ -219,7 +219,7 @@
     const target = document.getElementById('create-bar-summary');
     if (lines?.dataset?.summary && target) target.textContent = lines.dataset.summary.split('. ')[0];
     const blocked = blockedGpu();
-    if (blocked && target) target.textContent = `${blocked.gpu} cannot run this model. Choose another GPU.`;
+    if (blocked && target) target.textContent = `${blocked.gpu} 无法运行此模型，请选择其他 GPU。`;
     target?.classList?.toggle('cb-blocked', Boolean(blocked));
   };
   document.addEventListener('htmx:afterSwap', (event) => {
@@ -229,7 +229,7 @@
   const updateFilterSummary = (filter) => {
     const count = filter.querySelectorAll('input[type="checkbox"]:checked').length;
     const label = filter.querySelector('[data-filter-count]');
-    if (label) label.textContent = count ? `${count} selected` : 'All';
+    if (label) label.textContent = count ? `已选 ${count} 项` : '全部';
     filter.dataset.active = String(count > 0);
   };
   document.addEventListener('change', (event) => {
@@ -239,7 +239,7 @@
   let logsPaused = false;
   window.cbToggleLogs = (button) => {
     logsPaused = !logsPaused;
-    button.textContent = logsPaused ? 'Resume' : 'Pause';
+    button.textContent = logsPaused ? '继续' : '暂停';
     button.setAttribute('aria-pressed', String(logsPaused));
     htmx.trigger(document.getElementById('session-logs'), logsPaused ? 'htmx:abort' : 'refresh');
   };
@@ -311,10 +311,10 @@
     document.getElementById('projection-field').hidden = !projection;
     document.getElementById('refusal_projection').disabled = !projection;
     document.getElementById('ctx').placeholder = custom && engine === 'strata'
-      ? (qwen36 ? '8192' : '131072') : 'preset default';
-    document.getElementById('parallel').placeholder = engine === 'strata' ? '1 (FIFO, single sequence)' : 'preset default';
+      ? (qwen36 ? '8192' : '131072') : '预设默认值';
+    document.getElementById('parallel').placeholder = engine === 'strata' ? '1（FIFO，单序列）' : '预设默认值';
     document.getElementById('kv').disabled = qwen36;
-    document.getElementById('kv').placeholder = qwen36 ? 'f32 (fixed)' : custom && engine === 'strata' ? 'int8' : 'preset default';
+    document.getElementById('kv').placeholder = qwen36 ? 'f32（固定）' : custom && engine === 'strata' ? 'int8' : '预设默认值';
     repo.placeholder = engine === 'strata'
       ? 'ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF' : 'org/model';
     document.getElementById('file').placeholder = qwen36 ? 'Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf' : engine === 'strata'
@@ -332,7 +332,7 @@
     kv.dataset.currentKv ??= kv.placeholder;
     if (kv.disabled !== qwen36) kv.value = '';
     kv.disabled = qwen36;
-    kv.placeholder = qwen36 ? 'f32 (fixed)' : select.value ? 'preset default' : kv.dataset.currentKv;
+    kv.placeholder = qwen36 ? 'f32（固定）' : select.value ? '预设默认值' : kv.dataset.currentKv;
     kv.setAttribute('list', `rc-kv-types-${engine}`);
     document.getElementById('rc-extra').placeholder = qwen36 ? '' : engine === 'exllamav3'
       ? 'model.chunk_size=4096' : engine === 'strata' ? '--ple-io direct' : '--reasoning-budget 4096';
@@ -347,13 +347,13 @@
         headers: { 'X-CSRF-Token': csrf() }, body: fields });
       if (form.isConnected === false) return;
       if (!response.ok) {
-        cbToast('error', 'Cannot review', (await response.json()).error || 'Check the session fields');
+        cbToast('error', '无法复核', (await response.json()).error || '请检查会话字段');
         return;
       }
       const markup = await response.text();
       if (form.isConnected === false) return;
       if (new URLSearchParams(new FormData(form)).toString() !== reviewed) {
-        cbToast('info', 'Review again', 'The form changed while calculating cost');
+        cbToast('info', '请重新复核', '计算费用期间表单已更改');
         return;
       }
       const target = document.getElementById('estimate');
@@ -363,15 +363,15 @@
       updateCreateSummary();
       const blocked = blockedGpu();
       if (blocked) {
-        cbToast('error', `${blocked.gpu} cannot run this model`, `${blocked.message}. Choose a GPU that is not greyed out.`);
+        cbToast('error', `${blocked.gpu} 无法运行此模型`, `${blocked.message}。请选择未变灰的 GPU。`);
         return;
       }
       const lines = document.getElementById('cost-lines');
       document.getElementById('create-summary').textContent =
-        `${lines ? lines.dataset.summary : ''}. This spends compute units from now until the session stops.`;
+        `${lines ? lines.dataset.summary : ''}。从现在起直到会话停止，都会持续消耗计算单元。`;
       document.getElementById('create-dialog').showModal();
     } catch (err) {
-      if (form.isConnected !== false) cbToast('error', 'Cannot review', String(err));
+      if (form.isConnected !== false) cbToast('error', '无法复核', String(err));
     }
   };
 
@@ -379,12 +379,12 @@
   const metricsLine = (metrics, target) => {
     target.textContent = [
       metrics.ttft !== undefined ? `TTFT ${fmt(metrics.ttft / 1000, 2)} s` : '',
-      metrics.engineTps ? `engine ${fmt(metrics.engineTps)} t/s` : '',
-      metrics.e2eTps ? `end-to-end ${fmt(metrics.e2eTps)} t/s` : '',
-      metrics.prompt !== undefined ? `prompt ${metrics.prompt} tok` : '',
-      metrics.out !== undefined ? `out ${metrics.out} tok` : '',
-      `total ${fmt(metrics.total / 1000, 2)} s`, `HTTP ${metrics.status}`,
-      'recorded as client colabinet-playground',
+      metrics.engineTps ? `推理引擎 ${fmt(metrics.engineTps)} t/s` : '',
+      metrics.e2eTps ? `端到端 ${fmt(metrics.e2eTps)} t/s` : '',
+      metrics.prompt !== undefined ? `提示 ${metrics.prompt} tok` : '',
+      metrics.out !== undefined ? `输出 ${metrics.out} tok` : '',
+      `总计 ${fmt(metrics.total / 1000, 2)} s`, `HTTP ${metrics.status}`,
+      '已记录为客户端 colabinet-playground',
     ].filter(Boolean).join(' · ');
   };
   const numbers = (obj) => {
@@ -404,7 +404,7 @@
     document.getElementById('pg-python-panel').hidden = language !== 'python';
     document.getElementById('pg-curl-panel').hidden = language !== 'curl';
     const copy = document.getElementById('pg-copy-example');
-    copy.setAttribute('aria-label', `Copy ${language === 'python' ? 'Python' : 'curl'} example`);
+    copy.setAttribute('aria-label', `复制 ${language === 'python' ? 'Python' : 'curl'} 示例`);
     const session = document.getElementById('pg-session').selectedOptions[0];
     const limit = Number(document.getElementById('pg-max').value);
     const valid = session?.dataset.model && session?.dataset.endpoint && Number.isSafeInteger(limit) && limit > 0;
@@ -467,14 +467,14 @@ COLABINET_REQUEST
                    max_tokens: Number(element('pg-max').value), stream };
     element('pg-output').textContent = ''; element('pg-reasoning').textContent = ''; element('pg-reasoning-box').hidden = true;
     element('pg-hint').hidden = true;
-    element('pg-metrics').textContent = 'Sending…'; element('pg-raw-out').hidden = !element('pg-raw').checked; element('pg-raw-out').textContent = '';
+    element('pg-metrics').textContent = '发送中…'; element('pg-raw-out').hidden = !element('pg-raw').checked; element('pg-raw-out').textContent = '';
     element('pg-send').disabled = true;
     const t0 = performance.now();
     try {
       const response = await fetch('/ui/playground/send', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() }, body: JSON.stringify(body), signal: controller.signal });
       if (!stream || !response.headers.get('content-type')?.includes('text/event-stream')) {
         const data = await response.json();
-        if (data.error) { cbToast('error', 'Not sent', data.error); element('pg-metrics').textContent = ''; return; }
+        if (data.error) { cbToast('error', '未发送', data.error); element('pg-metrics').textContent = ''; return; }
         const msg = data.body?.choices?.[0]?.message || {};
         if (msg.reasoning_content) { element('pg-reasoning-box').hidden = false; element('pg-reasoning').textContent = msg.reasoning_content; }
         element('pg-output').textContent = msg.content ?? JSON.stringify(data.body?.error || data.body);
@@ -510,7 +510,7 @@ COLABINET_REQUEST
       metricsLine({ ...counts, ttft, total, status: response.status, e2eTps: counts.out && total > 0 ? counts.out / (total / 1000) : undefined }, element('pg-metrics'));
       element('pg-raw-out').textContent = `request:\n${JSON.stringify(body, null, 2)}\n\nresponse (SSE):\n${raw}`;
     } catch (err) {
-      if (!controller.signal.aborted) cbToast('error', 'Request failed', String(err));
+      if (!controller.signal.aborted) cbToast('error', '请求失败', String(err));
     } finally {
       if (playgroundController === controller) playgroundController = null;
       element('pg-send').disabled = false;
@@ -528,7 +528,7 @@ COLABINET_REQUEST
       target.hidden = false;
       target.textContent = JSON.stringify(data, null, 2);
     } catch (err) {
-      if (!controller.signal.aborted) cbToast('error', 'Could not fetch models', String(err));
+      if (!controller.signal.aborted) cbToast('error', '无法获取模型列表', String(err));
     } finally {
       if (modelsController === controller) modelsController = null;
     }

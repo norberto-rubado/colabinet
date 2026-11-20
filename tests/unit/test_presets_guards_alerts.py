@@ -23,14 +23,14 @@ def test_repo_presets_load():
 @pytest.mark.parametrize(
     "text,msg",
     [
-        ("[[preset]]\nid='a'\nengine='llamacpp'\nlabel='x'\n", "missing 'repo'"),
-        ("[[preset]]\nid='a'\nengine='vllm'\nlabel='x'\nrepo='r'\n", "unknown engine"),
-        ("[[preset]]\nid='a'\nengine='llamacpp'\nlabel='x'\nrepo='r'\n", "need 'file'"),
+        ("[[preset]]\nid='a'\nengine='llamacpp'\nlabel='x'\n", "缺少 'repo'"),
+        ("[[preset]]\nid='a'\nengine='vllm'\nlabel='x'\nrepo='r'\n", "未知推理引擎"),
+        ("[[preset]]\nid='a'\nengine='llamacpp'\nlabel='x'\nrepo='r'\n", "需要 'file'"),
         ("[[preset]\n", "presets.toml"),
         ("[[preset]]\nid='a'\nengine='llamacpp'\nlabel='x'\nrepo='r'\nfile='f.gguf'\n[preset.gpu.L4]\nextra_args='-fa'\n",
-         "extra_args must be a list of strings"),
+         "extra_args 必须是字符串列表"),
         ("[[preset]]\nid='a'\nengine='llamacpp'\nlabel='x'\nrepo='r'\nfile='f.gguf'\n[preset.measured]\nL4={gen_tps=0}\n",
-         "gen_tps and prefill_tps must be positive"),
+         "gen_tps 和 prefill_tps 必须是正数"),
         ("[[preset]]\nid='a'\nengine='llamacpp'\nlabel='x'\nrepo='r'\nfile='f.gguf'\n[preset.measured]\nL4={tps=3}\n",
          "unexpected keyword"),
     ],
@@ -52,7 +52,7 @@ def sess(**over):
 def test_idle_warn_then_stop():
     assert evaluate(sess(), now=24 * 60, activity_last=0, grace_s=600).action == "none"
     d = evaluate(sess(), now=26 * 60, activity_last=0, grace_s=600)
-    assert (d.action, d.reason) == ("warn", "idle") and "4 min" in d.message
+    assert (d.action, d.reason) == ("warn", "idle") and "4 分钟" in d.message
     assert evaluate(sess(), now=30 * 60, activity_last=0, grace_s=600).reason == "idle"
     # activity resets the clock
     assert evaluate(sess(), now=30 * 60, activity_last=20 * 60, grace_s=600).action == "none"

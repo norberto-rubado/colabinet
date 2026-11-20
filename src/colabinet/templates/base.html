@@ -1,5 +1,5 @@
 {% from "macros.html" import icon, logo, nav_attrs %}<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -23,29 +23,29 @@
 <aside class="sidebar" data-side="left" aria-hidden="false" id="sidebar">
   <nav aria-label="colabinet">
     <header>
-      <a href="/" {{ nav_attrs() }} class="cb-brand">{{ logo() }}<span><strong>colabinet</strong><small>Colab LLM console</small></span></a>
+      <a href="/" {{ nav_attrs() }} class="cb-brand">{{ logo() }}<span><strong>colabinet</strong><small>Colab LLM 控制台</small></span></a>
     </header>
     <section class="scrollbar">
       <div role="group" aria-labelledby="nav-main">
-        <h3 id="nav-main">Console</h3>
+        <h3 id="nav-main">控制台</h3>
         <ul>
-          <li><a href="/" {{ nav_attrs() }} {% if active == 'overview' %}aria-current="page"{% endif %}>{{ icon('overview') }}<span>Overview</span></a></li>
-          <li><a href="/sessions" {{ nav_attrs() }} {% if active == 'sessions' %}aria-current="page"{% endif %}>{{ icon('sessions') }}<span>Sessions</span><span id="nav-live-count" class="badge cb-nav-badge" title="Live sessions" {% if not base.live_count %}hidden{% endif %}>{{ base.live_count }}</span></a></li>
-          <li><a href="/new" {{ nav_attrs() }} {% if active == 'new' %}aria-current="page"{% endif %}>{{ icon('new') }}<span>New session</span></a></li>
+          <li><a href="/" {{ nav_attrs() }} {% if active == 'overview' %}aria-current="page"{% endif %}>{{ icon('overview') }}<span>概览</span></a></li>
+          <li><a href="/sessions" {{ nav_attrs() }} {% if active == 'sessions' %}aria-current="page"{% endif %}>{{ icon('sessions') }}<span>会话</span><span id="nav-live-count" class="badge cb-nav-badge" title="运行中的会话" {% if not base.live_count %}hidden{% endif %}>{{ base.live_count }}</span></a></li>
+          <li><a href="/new" {{ nav_attrs() }} {% if active == 'new' %}aria-current="page"{% endif %}>{{ icon('new') }}<span>新建会话</span></a></li>
         </ul>
       </div>
       <div role="group" aria-labelledby="nav-use">
-        <h3 id="nav-use">Use</h3>
+        <h3 id="nav-use">使用</h3>
         <ul>
-          <li><a href="/playground" {{ nav_attrs() }} {% if active == 'playground' %}aria-current="page"{% endif %}>{{ icon('playground') }}<span>Playground</span></a></li>
-          <li><a href="/metrics" {{ nav_attrs() }} {% if active == 'metrics' %}aria-current="page"{% endif %}>{{ icon('metrics') }}<span>Metrics</span></a></li>
+          <li><a href="/playground" {{ nav_attrs() }} {% if active == 'playground' %}aria-current="page"{% endif %}>{{ icon('playground') }}<span>对话测试</span></a></li>
+          <li><a href="/metrics" {{ nav_attrs() }} {% if active == 'metrics' %}aria-current="page"{% endif %}>{{ icon('metrics') }}<span>用量统计</span></a></li>
         </ul>
       </div>
       <div role="group" aria-labelledby="nav-conf">
-        <h3 id="nav-conf">Configure</h3>
+        <h3 id="nav-conf">配置</h3>
         <ul>
-          <li><a href="/models" {{ nav_attrs() }} {% if active == 'models' %}aria-current="page"{% endif %}>{{ icon('models') }}<span>Models</span></a></li>
-          <li><a href="/settings" {{ nav_attrs() }} {% if active == 'settings' %}aria-current="page"{% endif %}>{{ icon('settings') }}<span>Settings</span></a></li>
+          <li><a href="/models" {{ nav_attrs() }} {% if active == 'models' %}aria-current="page"{% endif %}>{{ icon('models') }}<span>模型</span></a></li>
+          <li><a href="/settings" {{ nav_attrs() }} {% if active == 'settings' %}aria-current="page"{% endif %}>{{ icon('settings') }}<span>设置</span></a></li>
         </ul>
       </div>
     </section>
@@ -54,45 +54,45 @@
         {% include "partials/sidebar_status.html" %}
       </div>
       <div class="cb-row cb-sidebar-actions">
-        <button type="button" class="btn cb-stop-all" data-variant="ghost" data-size="sm" onclick="document.getElementById('stop-all-dialog').showModal()" title="Stop every live session">{{ icon('stop') }}Stop all sessions</button>
+        <button type="button" class="btn cb-stop-all" data-variant="ghost" data-size="sm" onclick="document.getElementById('stop-all-dialog').showModal()" title="停止所有运行中的会话">{{ icon('stop') }}停止所有会话</button>
       </div>
     </footer>
   </nav>
 </aside>
 <main id="cb-view" class="cb-main" hx-history-elt hx-sync="this:replace" hx-disinherit="hx-sync">
   <header class="cb-topbar">
-    <button type="button" class="btn" data-variant="ghost" data-size="icon" onclick="document.getElementById('sidebar').toggle()" aria-label="Toggle sidebar" title="Toggle sidebar">{{ icon('menu') }}</button>
+    <button type="button" class="btn" data-variant="ghost" data-size="icon" onclick="document.getElementById('sidebar').toggle()" aria-label="切换侧边栏" title="切换侧边栏">{{ icon('menu') }}</button>
     <div class="cb-crumbs">{% block crumbs %}{% endblock %}</div>
     <div class="cb-top-actions">
       {% block actions %}{% endblock %}
-      <button type="button" class="btn cb-search-trigger" data-variant="outline" data-size="sm" onclick="document.getElementById('cmdk').showModal()" aria-label="Search">{{ icon('search') }}<span class="cb-hide-sm">Search or jump to…</span><kbd class="kbd">⌘K</kbd></button>
-      <button type="button" class="btn cb-theme-toggle" data-variant="ghost" data-size="icon" onclick="basecoat.theme.toggle()" aria-label="Toggle dark mode" title="Toggle dark mode"><span class="cb-when-light">{{ icon('moon') }}</span><span class="cb-when-dark">{{ icon('sun') }}</span></button>
+      <button type="button" class="btn cb-search-trigger" data-variant="outline" data-size="sm" onclick="document.getElementById('cmdk').showModal()" aria-label="搜索">{{ icon('search') }}<span class="cb-hide-sm">搜索或跳转…</span><kbd class="kbd">⌘K</kbd></button>
+      <button type="button" class="btn cb-theme-toggle" data-variant="ghost" data-size="icon" onclick="basecoat.theme.toggle()" aria-label="切换深色模式" title="切换深色模式"><span class="cb-when-light">{{ icon('moon') }}</span><span class="cb-when-dark">{{ icon('sun') }}</span></button>
     </div>
   </header>
   <div class="cb-page" data-page="{{ active }}" data-live-count="{{ base.live_count }}">
     {% block content %}{% endblock %}
   </div>
 </main>
-<div id="cb-loading" class="cb-loading" role="status" aria-live="polite" hidden><span class="cb-visually-hidden">Loading page…</span></div>
+<div id="cb-loading" class="cb-loading" role="status" aria-live="polite" hidden><span class="cb-visually-hidden">页面加载中…</span></div>
 
 {% include "partials/cmdk.html" %}
 
 <dialog id="stop-all-dialog" class="dialog" aria-labelledby="stop-all-title">
   <div>
-    <header><span class="cb-dialog-icon">{{ icon('stop') }}</span><h2 id="stop-all-title">Stop every live session?</h2><p>colabinet stops each managed session by name and confirms it with <code>colab sessions</code>. Their VMs are deleted.</p></header>
+    <header><span class="cb-dialog-icon">{{ icon('stop') }}</span><h2 id="stop-all-title">要停止所有运行中的会话吗？</h2><p>colabinet 会按名称逐个停止托管会话，并用 <code>colab sessions</code> 确认。这些会话的 VM 将被删除。</p></header>
     <footer>
-      <button class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
-      <button class="btn" data-variant="destructive" hx-post="/ui/actions/stop-all" hx-vals='{"confirm":"yes"}' hx-swap="none" onclick="this.closest('dialog').close()">Stop all</button>
+      <button class="btn" data-variant="outline" onclick="this.closest('dialog').close()">取消</button>
+      <button class="btn" data-variant="destructive" hx-post="/ui/actions/stop-all" hx-vals='{"confirm":"yes"}' hx-swap="none" onclick="this.closest('dialog').close()">全部停止</button>
     </footer>
   </div>
 </dialog>
 
 <dialog id="stop-dialog" class="dialog" aria-labelledby="stop-title">
   <div>
-    <header><span class="cb-dialog-icon">{{ icon('stop') }}</span><h2 id="stop-title">Stop <span id="stop-name"></span>?</h2><p>The VM is deleted; its bill closes once Colab confirms the stop.</p></header>
+    <header><span class="cb-dialog-icon">{{ icon('stop') }}</span><h2 id="stop-title">要停止 <span id="stop-name"></span> 吗？</h2><p>VM 将被删除；Colab 确认停止后即停止计费。</p></header>
     <footer>
-      <button class="btn" data-variant="outline" onclick="this.closest('dialog').close()">Cancel</button>
-      <button class="btn" data-variant="destructive" id="stop-confirm" hx-vals='{"confirm":"yes"}' hx-swap="none" onclick="this.closest('dialog').close()">Stop</button>
+      <button class="btn" data-variant="outline" onclick="this.closest('dialog').close()">取消</button>
+      <button class="btn" data-variant="destructive" id="stop-confirm" hx-vals='{"confirm":"yes"}' hx-swap="none" onclick="this.closest('dialog').close()">停止</button>
     </footer>
   </div>
 </dialog>

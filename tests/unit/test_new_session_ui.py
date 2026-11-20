@@ -142,14 +142,14 @@ return { initial, flagged, moved, settled };
 """.replace("BLOCKED_REVIEW", json.dumps(review("CPU", "L4"))).replace("L4_REVIEW", json.dumps(review("L4", ""))))
     initial, flagged = result["initial"], result["flagged"]
     assert initial["checked"] == initial["submitted"] == ["CPU"]
-    assert initial["disabled"] == ["T4"] and initial["labels"]["CPU"] == "GPU required"
+    assert initial["disabled"] == ["T4"] and initial["labels"]["CPU"] == "需要 GPU"
     assert flagged["checked"] == flagged["submitted"] == ["CPU"] and flagged["disabled"] == ["T4"]
-    assert flagged["note"].startswith("CPU cannot run this model") and flagged["note"].endswith("Use L4 instead")
-    assert flagged["bar"] == "CPU cannot run this model. Choose another GPU."
+    assert flagged["note"].startswith("CPU 无法以当前设置运行此模型") and flagged["note"].endswith("改用 L4")
+    assert flagged["bar"] == "CPU 无法运行此模型，请选择其他 GPU。"
     assert result["moved"]["checked"] == ["L4"]
     settled = result["settled"]
     assert settled["checked"] == ["L4"] and settled["disabled"] == ["CPU", "T4"] and settled["note"] is None
-    assert settled["bar"].startswith("L4 at") and settled["labels"]["L4"] == "Fits in VRAM"
+    assert settled["bar"].startswith("L4，") and settled["labels"]["L4"] == "VRAM 够用"
     assert all(state["nativeRadiosShown"] == [] for state in (initial, flagged, settled))
 
 

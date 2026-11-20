@@ -1,35 +1,35 @@
 {% from "macros.html" import icon, nav_attrs %}
-<dialog id="cmdk" class="command-dialog" aria-label="Command menu" onclick="if (event.target === this) this.close()"{% if oob %} hx-swap-oob="outerHTML"{% endif %}>
+<dialog id="cmdk" class="command-dialog" aria-label="命令菜单" onclick="if (event.target === this) this.close()"{% if oob %} hx-swap-oob="outerHTML"{% endif %}>
   <div class="command">
     <header>
       {{ icon('search') }}
-      <input type="text" id="cmdk-input" placeholder="Jump to a page or session, or run an action…" autocomplete="off" autocorrect="off" spellcheck="false" aria-autocomplete="list" role="combobox" aria-expanded="true" aria-controls="cmdk-menu">
+      <input type="text" id="cmdk-input" placeholder="跳转到页面或会话，或执行操作…" autocomplete="off" autocorrect="off" spellcheck="false" aria-autocomplete="list" role="combobox" aria-expanded="true" aria-controls="cmdk-menu">
     </header>
-    <div role="menu" id="cmdk-menu" aria-orientation="vertical" data-empty="Nothing matches.">
+    <div role="menu" id="cmdk-menu" aria-orientation="vertical" data-empty="没有匹配项。">
       <div role="group" aria-labelledby="cmdk-pages">
-        <span role="heading" id="cmdk-pages">Pages</span>
-        <a role="menuitem" href="/" {{ nav_attrs() }}>{{ icon('overview') }}Overview</a>
-        <a role="menuitem" href="/sessions" {{ nav_attrs() }}>{{ icon('sessions') }}Sessions</a>
-        <a role="menuitem" href="/new" {{ nav_attrs() }}>{{ icon('new') }}New session</a>
-        <a role="menuitem" href="/playground" {{ nav_attrs() }}>{{ icon('playground') }}Playground</a>
-        <a role="menuitem" href="/metrics" {{ nav_attrs() }}>{{ icon('metrics') }}Metrics</a>
-        <a role="menuitem" href="/models" {{ nav_attrs() }}>{{ icon('models') }}Models</a>
-        <a role="menuitem" href="/settings" {{ nav_attrs() }}>{{ icon('settings') }}Settings</a>
+        <span role="heading" id="cmdk-pages">页面</span>
+        <a role="menuitem" href="/" {{ nav_attrs() }}>{{ icon('overview') }}概览</a>
+        <a role="menuitem" href="/sessions" {{ nav_attrs() }}>{{ icon('sessions') }}会话</a>
+        <a role="menuitem" href="/new" {{ nav_attrs() }}>{{ icon('new') }}新建会话</a>
+        <a role="menuitem" href="/playground" {{ nav_attrs() }}>{{ icon('playground') }}对话测试</a>
+        <a role="menuitem" href="/metrics" {{ nav_attrs() }}>{{ icon('metrics') }}用量统计</a>
+        <a role="menuitem" href="/models" {{ nav_attrs() }}>{{ icon('models') }}模型</a>
+        <a role="menuitem" href="/settings" {{ nav_attrs() }}>{{ icon('settings') }}设置</a>
       </div>
       {% if base.command_sessions %}
       <div role="group" aria-labelledby="cmdk-sessions">
-        <span role="heading" id="cmdk-sessions">Sessions</span>
+        <span role="heading" id="cmdk-sessions">会话</span>
         {% for session in base.command_sessions %}
-        <a role="menuitem" href="/sessions/{{ session.id }}" {{ nav_attrs() }} data-keywords="{{ session.name }} {{ session.state }}">{{ icon('sessions') }}Open {{ session.name }} <span class="cb-muted">({{ session.state | replace('_', ' ') }})</span></a>
-        <div role="menuitem" data-keywords="copy endpoint {{ session.name }}" onclick="cbCopy('{{ session.endpoint }}'); document.getElementById('cmdk').close()">{{ icon('copy') }}Copy endpoint of {{ session.name }}</div>
-        <div role="menuitem" data-keywords="stop {{ session.name }}" onclick="document.getElementById('cmdk').close(); cbConfirmStop({{ session.id }}, '{{ session.name }}')">{{ icon('stop') }}Stop {{ session.name }}</div>
+        <a role="menuitem" href="/sessions/{{ session.id }}" {{ nav_attrs() }} data-keywords="{{ session.name }} {{ session.state }}">{{ icon('sessions') }}打开 {{ session.name }} <span class="cb-muted">({{ session.state | replace('_', ' ') }})</span></a>
+        <div role="menuitem" data-keywords="copy endpoint {{ session.name }}" onclick="cbCopy('{{ session.endpoint }}'); document.getElementById('cmdk').close()">{{ icon('copy') }}复制 {{ session.name }} 的端点</div>
+        <div role="menuitem" data-keywords="stop {{ session.name }}" onclick="document.getElementById('cmdk').close(); cbConfirmStop({{ session.id }}, '{{ session.name }}')">{{ icon('stop') }}停止 {{ session.name }}</div>
         {% endfor %}
       </div>
       {% endif %}
       <div role="group" id="cmdk-gpus" aria-labelledby="cmdk-new">
-        <span role="heading" id="cmdk-new">New session</span>
+        <span role="heading" id="cmdk-new">新建会话</span>
         {% for gpu in base.new_gpus %}
-        <a role="menuitem" href="/new?gpu={{ gpu }}" {{ nav_attrs() }} data-keywords="create new {{ gpu }}">{{ icon('new') }}New session on {{ gpu }}</a>
+        <a role="menuitem" href="/new?gpu={{ gpu }}" {{ nav_attrs() }} data-keywords="create new {{ gpu }}">{{ icon('new') }}在 {{ gpu }} 上新建会话</a>
         {% endfor %}
       </div>
     </div>

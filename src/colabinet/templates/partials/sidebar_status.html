@@ -1,11 +1,11 @@
 {% from "macros.html" import icon, meter, nav_attrs %}
 <dl class="cb-status">
-  <dt>Balance</dt>
-  <dd>{% if base.balance is not none %}<strong>{{ base.balance | num(2) }}</strong> CU <small title="Age of the last colab usage reading">· {{ base.usage_age_s | dur }} old</small>{% else %}—{% endif %}</dd>
-  <dt>Burning</dt>
-  <dd>{{ base.burn_rate | num(2) }} CU/h · {{ base.live_count }} live</dd>
-  <dt>Today</dt>
-  <dd>{{ base.daily.spend | num(2) }} / {{ base.daily.cap | num(0) if base.daily.cap else 'no' }} CU cap</dd>
-  {% if base.daily.cap %}{{ meter(100 * base.daily.spend / base.daily.cap, 'Daily compute unit cap', (base.daily.spend | num(2)) ~ ' of ' ~ (base.daily.cap | num(0)) ~ ' compute units used today', max=base.daily.cap, now=[base.daily.cap, base.daily.spend] | min | round(2)) }}{% endif %}
-  {% if base.alert_count %}<dt class="cb-visually-hidden">Alerts</dt><dd class="cb-status-alerts-row"><a class="cb-status-alerts" href="/" {{ nav_attrs() }}>{{ icon('alert') }}{{ base.alert_count }} need{{ 's' if base.alert_count == 1 else '' }} attention</a></dd>{% endif %}
+  <dt>余额</dt>
+  <dd>{% if base.balance is not none %}<strong>{{ base.balance | num(2) }}</strong> CU <small title="距上次读取 colab 用量的时间">· {{ base.usage_age_s | dur }}前</small>{% else %}—{% endif %}</dd>
+  <dt>消耗速率</dt>
+  <dd>{{ base.burn_rate | num(2) }} CU/h · {{ base.live_count }} 个运行中</dd>
+  <dt>今日</dt>
+  <dd>{{ base.daily.spend | num(2) }} / {{ base.daily.cap | num(0) if base.daily.cap else '无' }} CU 上限</dd>
+  {% if base.daily.cap %}{{ meter(100 * base.daily.spend / base.daily.cap, '每日计算单元上限', '今日已用 ' ~ (base.daily.spend | num(2)) ~ ' / ' ~ (base.daily.cap | num(0)) ~ ' 计算单元', max=base.daily.cap, now=[base.daily.cap, base.daily.spend] | min | round(2)) }}{% endif %}
+  {% if base.alert_count %}<dt class="cb-visually-hidden">提醒</dt><dd class="cb-status-alerts-row"><a class="cb-status-alerts" href="/" {{ nav_attrs() }}>{{ icon('alert') }}{{ base.alert_count }} 项需要处理</a></dd>{% endif %}
 </dl>

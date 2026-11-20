@@ -129,7 +129,7 @@ const opened = await evaluate(`document.getElementById('reconfigure-dialog').ope
 await evaluate(`document.getElementById('reconfigure-dialog').close(); true`);
 await click('a[role="tab"][href="/sessions/1?tab=logs"]', '/sessions/1?tab=logs', '#session-logs');
 await evaluate(`Array.from(document.querySelectorAll('button')).find((button) =>
-  button.textContent === 'Pause').click(); true`);
+  button.textContent === '暂停').click(); true`);
 await click('#sidebar a[href="/"]', '/', '#ov-kpis');
 await click('#sidebar a[href="/sessions"]', '/sessions', '#sessions-table');
 await settled('/sessions', '#sessions-table tbody tr');
@@ -137,7 +137,7 @@ await click('#sessions-table a[href="/sessions/1"]', '/sessions/1', '#session-wa
 await click('a[role="tab"][href="/sessions/1?tab=logs"]', '/sessions/1?tab=logs', '#session-logs');
 return await evaluate(`({ shellKept: !!window.__shell, reconfigureOpened: ${opened},
   pauseReset: Array.from(document.querySelectorAll('button')).some((button) =>
-    button.textContent === 'Pause' && button.getAttribute('aria-pressed') === 'false'),
+    button.textContent === '暂停' && button.getAttribute('aria-pressed') === 'false'),
   resourcesPresent: !!document.querySelector('#session-resources .card'),
   eventsLoaded: !!document.querySelector('#session-log-events li') })`);
 """)
@@ -153,7 +153,7 @@ await click('#sidebar a[href="/metrics"]', '/metrics', '#metrics-form');
 await evaluate(`history.back(); true`);
 await settled('/playground', '#pg-prompt');
 const returned = await evaluate(`({ shellKept: !!window.__shell,
-  promptReset: document.getElementById('pg-prompt').value === 'Say hello in five words.',
+  promptReset: document.getElementById('pg-prompt').value === '用五个字打个招呼。',
   replyReset: document.getElementById('pg-output').textContent === '',
   privateStored: [localStorage, sessionStorage].some((storage) => Object.values(storage).some((value) =>
     value.includes('private-navigation-prompt') || value.includes('private-navigation-reply'))),
@@ -164,7 +164,7 @@ return { ...returned, forwardKeptShell: await evaluate(`!!window.__shell`),
   forwardTitle: await evaluate(`document.title`) };
 """)
     assert result == {"shellKept": True, "promptReset": True, "replyReset": True, "privateStored": False,
-                      "historyCached": False, "forwardKeptShell": True, "forwardTitle": "Metrics · colabinet"}
+                      "historyCached": False, "forwardKeptShell": True, "forwardTitle": "用量统计 · colabinet"}
 
 
 async def test_playground_examples_initialize_on_soft_navigation_and_history_restore(console):
@@ -203,7 +203,7 @@ return { first, edited, returned: await examples() };
         for language in ("python", "curl"):
             assert f"http://127.0.0.1:{row['proxy_port']}/v1/chat/completions" in state[language]
             assert run["alias"] in state[language]
-            assert "Say hello in five words." in state[language]
+            assert "用五个字打个招呼。" in state[language]
             assert "Changed before leaving" not in state[language]
     for language in ("python", "curl"):
         assert "Changed before leaving" in result["edited"][language]
@@ -239,7 +239,7 @@ const busy = await evaluate(`!document.getElementById('cb-loading').hidden &&
 await click('#sidebar a[href="/metrics"]', '/metrics', '#metrics-form');
 await delay(600);
 const latest = await evaluate(`location.pathname === '/metrics' &&
-  document.querySelector('.cb-crumbs h1').textContent === 'Metrics'`);
+  document.querySelector('.cb-crumbs h1').textContent === '用量统计'`);
 await evaluate(`document.querySelector('#sidebar a[href="/sessions"]').href = '/sessions/9999';
   htmx.process(document.querySelector('#sidebar a[href="/sessions/9999"]'));
   document.querySelector('#sidebar a[href="/sessions/9999"]').click(); true`);
@@ -349,7 +349,7 @@ return { busy, ...await evaluate(`({ shellKept: !!window.__shell,
 async def test_command_menu_theme_and_playground_requests_work_after_navigation(console):
     result = await browse(console, "/", r"""
 const dark = await evaluate(`basecoat.theme.toggle(); document.documentElement.classList.contains('dark')`);
-await evaluate(`document.querySelector('button[aria-label="Search"]').click(); true`);
+await evaluate(`document.querySelector('button[aria-label="搜索"]').click(); true`);
 await click('#cmdk a[href="/new"]', '/new', '#new-form');
 await evaluate(`cbNavigate('/new?preset=custom'); true`);
 await settled('/new?preset=custom', '#new-form[data-custom="true"]');
@@ -471,7 +471,7 @@ return await evaluate(`({ shellKept: !!window.__shell, pageKept: !!document.getE
   idle: document.getElementById('cb-loading').hidden &&
     !document.getElementById('cb-view').hasAttribute('aria-busy') })`);
 """.replace("SETUP", setup))
-    assert result == {"shellKept": True, "pageKept": True, "urlKept": True, "title": "Metrics · colabinet",
+    assert result == {"shellKept": True, "pageKept": True, "urlKept": True, "title": "用量统计 · colabinet",
                       "errors": [], "idle": True}
 
 

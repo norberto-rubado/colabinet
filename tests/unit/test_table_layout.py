@@ -170,14 +170,14 @@ def test_stop_action_is_present_and_reachable_for_a_live_session(tmp_path):
     result = run_browser(tmp_path, page, r"""
 await evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
 return await evaluate(`(() => {
-  const stop = Array.from(document.querySelectorAll('tbody button')).find((node) => node.textContent.trim() === 'Stop');
+  const stop = Array.from(document.querySelectorAll('tbody button')).find((node) => node.textContent.trim() === '停止');
   const bounds = stop.getBoundingClientRect();
   return { text: stop.textContent.trim(), onclick: stop.getAttribute('onclick'),
     variant: stop.getAttribute('data-variant'),
     inside: bounds.right <= innerWidth + 0.5 && bounds.left >= -0.5 };
 })()`);
 """)
-    assert result["text"] == "Stop"
+    assert result["text"] == "停止"
     assert "cbConfirmStop(1" in result["onclick"]
     assert result["variant"] == "destructive", result
     assert result["inside"], result

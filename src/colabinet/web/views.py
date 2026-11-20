@@ -17,12 +17,12 @@ from ..presets import Measured, Preset, PresetError
 from ..store import LIVE_STATES
 from ..supervisor import OPEN_ROWS, Supervisor
 
-SETUP_STEPS = [("vm_created", "VM"), ("state:setting_up", "GPU check"), ("vm:install_done", "install"),
-               ("vm:download_done", "download"), ("vm:server_ready", "load"), ("state:ready", "tunnel")]
+SETUP_STEPS = [("vm_created", "VM"), ("state:setting_up", "GPU 检查"), ("vm:install_done", "安装"),
+               ("vm:download_done", "下载"), ("vm:server_ready", "加载"), ("state:ready", "隧道")]
 _EVIDENCE_BADGES = {
-    "tested": ("GPU tested", "secondary"),
-    "reported": ("Reported GPU run", "outline"),
-    "build_only": ("Build verified", "outline"),
+    "tested": ("GPU 已实测", "secondary"),
+    "reported": ("有 GPU 运行报告", "outline"),
+    "build_only": ("仅验证构建", "outline"),
 }
 
 
@@ -80,7 +80,7 @@ async def session_rows(sup: Supervisor, where: str, params: tuple = (), limit: i
             last = max(act.effective(now) if act else 0.0, row["last_activity"] or 0.0)
             idle_left = max(0, round(row["idle_min"] * 60 - (now - last)))
         out.append({
-            **row, "account_email": accounts.get(row["account_id"], "Shared CLI account"),
+            **row, "account_email": accounts.get(row["account_id"], "共享 CLI 账号"),
             "run": run, "cu": billing.session_cu(row, now), "up_s": billing.billing_end(row,
                 now) - row["created_at"],
             "endpoint_url": f"http://127.0.0.1:{row['proxy_port']}/v1", "variant":
@@ -223,34 +223,34 @@ def fit_presentation(engine: str, fit: Fit, preset: Preset | None, gpu: str,
     """Show fit estimates or recorded GPU evidence, never infer evidence from fallback defaults."""
     if engine == "strata":
         if fit.verdict == "cpu":
-            return {"label": "GPU required", "variant": "destructive", "message": "Strata requires a GPU runtime"}
+            return {"label": "需要 GPU", "variant": "destructive", "message": "Strata 需要 GPU 运行时"}
         evidence = preset.evidence.get(gpu) if preset else None
         if evidence:
             label, variant = _EVIDENCE_BADGES[evidence.status]
             return {"label": label, "variant": variant,
-                    "message": evidence.message + " Recorded evidence is not a RAM/VRAM estimate or a guarantee "
-                               "for the requested context, PLE mode or refusal projection."}
+                    "message": evidence.message + " 记录的实测依据不是内存/VRAM 估算，也不保证"
+                               "所请求的上下文、PLE 模式或拒答投影一定可用。"}
         if strata_quant == QWEN36_QUANT:
-            return {"label": "Not benchmarked", "variant": "outline",
-                    "message": "Qwen3.6 places experts in VRAM and host RAM. This preset uses CPU vision."}
-        return {"label": "Not benchmarked", "variant": "outline",
-                "message": "No recorded benchmark for this preset/GPU pair. Strata uses a GPU expert cache, "
-                           "host RAM and a shared 28.8 GB PLE table. Download size is not VRAM residency; "
-                           "check available host RAM."}
-    label = {"fits": "Fits in VRAM", "tight": "Tight on VRAM", "spills": "CPU offload required",
-             "cpu": "CPU only", "unknown": "Size unknown"}[fit.verdict]
+            return {"label": "未做基准测试", "variant": "outline",
+                    "message": "Qwen3.6 将专家放在 VRAM 和主机内存中。此预设使用 CPU 视觉。"}
+        return {"label": "未做基准测试", "variant": "outline",
+                "message": "此预设与 GPU 的组合没有基准测试记录。Strata 使用 GPU 专家缓存、"
+                           "主机内存以及一个共享的 28.8 GB PLE 表。下载大小不等于 VRAM 占用；"
+                           "请检查可用的主机内存。"}
+    label = {"fits": "VRAM 够用", "tight": "VRAM 偏紧", "spills": "需要 CPU 卸载",
+             "cpu": "仅 CPU", "unknown": "大小未知"}[fit.verdict]
     variant = "secondary" if fit.verdict == "fits" else "outline"
     message = fit.message
     if engine == "exllamav3":
         if fit.verdict == "cpu":
-            label, variant, message = "GPU required", "destructive", "ExLlamaV3 requires a GPU runtime"
+            label, variant, message = "需要 GPU", "destructive", "ExLlamaV3 需要 GPU 运行时"
         elif fit.verdict == "spills":
-            label, variant = "Exceeds VRAM", "destructive"
-            message = "Estimated weights and KV cache exceed VRAM; reduce context/cache size or choose a larger GPU"
+            label, variant = "超出 VRAM", "destructive"
+            message = "估算的权重和 KV cache 超出 VRAM；请减小上下文/缓存大小，或选择更大的 GPU"
     elif fit.verdict == "spills":
-        message += "; sufficient host RAM is required for offloaded weights"
+        message += "；被卸载的权重需要足够的主机内存"
     if fit.verdict in ("fits", "tight") and fit.kv_gb is None:
-        label += " (weights only)"
+        label += "（仅计权重）"
     return {"label": label, "variant": variant, "message": message}
 
 
@@ -268,11 +268,11 @@ def strata_policy(quant: str, ram_gib: float, vram_gib: float, low_ram: str, dra
 
     low = low_ram == "on" or (low_ram == "auto" and ram_gib < arena * 1e9 / 2**30 + 10)
     if low and not low_fits():
-        return (f"Strata {quant} cannot fit about {ram_gib:.0f} GiB host RAM and {vram_gib:.0f} GiB VRAM under its "
-                "low-RAM policy")
+        return (f"按 Strata 的低内存（low-RAM）策略，{quant} 无法放进约 {ram_gib:.0f} GiB 主机内存和 "
+                f"{vram_gib:.0f} GiB VRAM")
     if not low and ram_gib < ram_need - 4:
-        hint = "; low-RAM mode would fit: add extra engine args --low-ram on" if low_fits() else ""
-        return f"Strata {quant} requires about {ram_need} GiB host RAM; this class has about {ram_gib:.0f}{hint}"
+        hint = "；低内存模式可以放下：请添加推理引擎额外参数 --low-ram on" if low_fits() else ""
+        return f"Strata {quant} 需要约 {ram_need} GiB 主机内存；此规格约有 {ram_gib:.0f} GiB{hint}"
     return None
 
 
@@ -303,17 +303,17 @@ def gpu_fit(engine: str, gpu: str, preset: Preset | None, weights_gb: float | No
             # Measured 2026-10-13: the 111 GB Flash-Next GGUF paged from disk and generated 0.24 tok/s on a T4
             # (16 GB VRAM, 13.6 GB RAM) and 1.8 tok/s on a T4-HIGHMEM (54.8 GB RAM), whose 0.6 tok/s prompt
             # processing would take nearly half an hour for a 1K-token prompt.
-            shown = {"label": "Too large", "variant": "destructive",
-                     "message": f"Needs about {need:.0f} GB, but this runtime has about {room:.0f} GB of VRAM "
-                                "and host RAM together; llama.cpp would page weights from disk and crawl"}
+            shown = {"label": "模型过大", "variant": "destructive",
+                     "message": f"需要约 {need:.0f} GB，但此运行时的 VRAM 和主机内存合计只有约 {room:.0f} GB；"
+                                "llama.cpp 将从磁盘换页读取权重，速度极慢"}
     if engine == "strata" and strata_quant in STRATA_MODELS and host_ram_gb and VRAM_GB.get(gpu):
         refusal = strata_policy(strata_quant, host_ram_gb * 1e9 / 2**30, VRAM_GB[gpu], low_ram, drafting)
         if refusal:
-            shown = {"label": "Not enough RAM", "variant": "destructive", "message": refusal}
+            shown = {"label": "内存不足", "variant": "destructive", "message": refusal}
     if (engine == "strata" and strata_quant == QWEN36_QUANT and VRAM_GB.get(gpu)
             and host_ram_gb and host_ram_gb * 1e9 / 2**30 < QWEN36_RAM_GIB):
-        shown = {"label": "Not enough RAM", "variant": "destructive",
-                 "message": f"Strata Qwen3.6 {QWEN36_QUANT} needs {QWEN36_RAM_GIB} GiB host RAM"}
+        shown = {"label": "内存不足", "variant": "destructive",
+                 "message": f"Strata Qwen3.6 {QWEN36_QUANT} 需要 {QWEN36_RAM_GIB} GiB 主机内存"}
     return {"gpu": gpu, "verdict": fit.verdict, "ctx": ctx, "kv": kv, "kv_gb": fit.kv_gb,
             "status": {"destructive": "blocked", "secondary": "ok"}.get(shown["variant"], "warn"),
             "measured": measured_speed(preset.measured.get(gpu) if preset else None), **shown}
@@ -328,10 +328,10 @@ def measured_speed(speed: Measured | None) -> dict[str, str] | None:
     if speed is None:
         return None
     prefill = f"{speed.prefill_tps:,.0f}" if speed.prefill_tps else None
-    detail = f"{tps(speed.gen_tps)} tok/s generation" + (f", {prefill} tok/s prefill on a 4K-token prompt"
-                                                           if prefill else "")
+    detail = f"生成 {tps(speed.gen_tps)} tok/s" + (f"，4K token 提示词预填充 {prefill} tok/s"
+                                                   if prefill else "")
     return {"gen": tps(speed.gen_tps), "prefill": prefill, "date": speed.date, "note": speed.note,
-            "detail": detail + (f" ({speed.note})" if speed.note else "")}
+            "detail": detail + (f"（{speed.note}）" if speed.note else "")}
 
 
 def fit_matrix(preset, host_ram: dict[str, float] | None = None) -> list[dict[str, Any]]:

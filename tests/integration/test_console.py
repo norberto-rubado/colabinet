@@ -34,11 +34,11 @@ async def console(tmp_path):
         world.store.db.close()
 
 
-PAGES = {"/": ["Overview", "Sessions", "CU per day", "Activity"],
-         "/sessions": ["Live", "History"], "/new": ["1 · GPU", "Create…", "L4"],
-         "/playground": ["Playground", "Send"], "/metrics": ["Builder", "SQL (read-only)", "Group by"],
-         "/models": ["Qwen3.8-27B abliterated Q4_K", "fit (preset defaults)", "EXL3"],
-         "/settings": ["Daily CU cap", "GPU rates", "0.7.4"]}
+PAGES = {"/": ["概览", "会话", "每日 CU", "活动"],
+         "/sessions": ["运行中", "历史"], "/new": ["第 1 步 · GPU", "创建…", "L4"],
+         "/playground": ["对话测试", "发送"], "/metrics": ["查询构建器", "SQL（只读）", "分组依据"],
+         "/models": ["Qwen3.8-27B abliterated Q4_K", "适配（预设默认值）", "EXL3"],
+         "/settings": ["每日 CU 上限", "GPU 费率", "0.7.4"]}
 
 
 async def test_pages_render(console):
@@ -50,7 +50,7 @@ async def test_pages_render(console):
             assert needle in response.text, (path, needle)
         assert f'"X-CSRF-Token": "{CSRF}"' in response.text
     response = await client.get(f"/sessions/{sid}")
-    assert response.status_code == 200 and "http://127.0.0.1:" in response.text and "pi provider JSON" in response.text
+    assert response.status_code == 200 and "http://127.0.0.1:" in response.text and "pi 提供方 JSON" in response.text
     for tab in ("runs", "requests", "logs"):
         assert (await client.get(f"/sessions/{sid}?tab={tab}")).status_code == 200
     assert (await client.get("/sessions/999")).status_code == 404
@@ -66,7 +66,7 @@ async def test_partials_render(console):
     assert "pi/0.99" in response.text and "engine" in response.text
     for part in ("status", "runs", "logs"):
         assert (await client.get(f"/ui/sessions/{sid}/{part}")).status_code == 200
-    assert "Balance" in (await client.get("/ui/sidebar-status")).text
+    assert "余额" in (await client.get("/ui/sidebar-status")).text
     response = await client.get("/ui/overview/chart")
     assert "data-cb-chart" in response.text and "L4" in response.text
 
@@ -75,7 +75,7 @@ async def test_actions_need_csrf(console):
     world, client, sid = console
     assert (await client.post(f"/ui/actions/sessions/{sid}/keep")).status_code == 403
     response = await client.post(f"/ui/actions/sessions/{sid}/keep", headers={"X-CSRF-Token": CSRF})
-    assert response.status_code == 204 and "idle timer reset" in response.headers["HX-Trigger"]
+    assert response.status_code == 204 and "闲置计时已重置" in json.loads(response.headers["HX-Trigger"])["cb-toast"]["title"]
     response = await client.post(f"/ui/actions/sessions/{sid}/keep",
                      headers={"X-CSRF-Token": CSRF, "Origin": "https://x.example"})
     assert response.status_code == 403
@@ -87,10 +87,11 @@ async def test_estimate_and_create_validation(console):
     preset = "qwen38-27b-abl-q4k"
     response = await client.post("/ui/new/estimate", data={"gpu": "L4", "preset": preset, "idle_min": "30"},
         headers=headers)
-    assert response.status_code == 200 and "Fit on L4: Tight on VRAM" in response.text and "1.54 CU/h" in response.text
+    assert response.status_code == 200 and "适配情况（L4）：VRAM 偏紧" in response.text and "1.54 CU/h" in response.text
     response = await client.post("/ui/new/estimate", data={"gpu": "L4", "preset": preset, "kv": "f16",
         "idle_min": "0"}, headers=headers)
-    assert "CPU offload required" in response.text and "Nothing will stop this session" in response.text
+    labels = {row["label"] for row in json.loads(html.unescape(re.search(r'data-fit="([^"]*)"', response.text).group(1))).values()}
+    assert "需要 CPU 卸载" in labels and "没有任何限制会停止此会话" in response.text
     response = await client.post("/ui/actions/create", data={"name": "llm2", "gpu": "L4", "preset": preset},
         headers=headers)
     assert response.status_code == 409 and "confirm" in response.json()["error"]
@@ -98,7 +99,7 @@ async def test_estimate_and_create_validation(console):
         "confirm": "yes"},
                      headers=headers)
     err = response.json()["error"]
-    assert response.status_code == 409 and ("in use" in err or "listed" in err)
+    assert response.status_code == 409 and ("已被另一个会话使用" in err or "已存在名为" in err)
 
 
 async def test_custom_engine_review_uses_its_own_kv_default(console):
@@ -107,17 +108,17 @@ async def test_custom_engine_review_uses_its_own_kv_default(console):
         response = await client.post("/ui/new/estimate", headers={"X-CSRF-Token": CSRF},
                                      data={"preset": "custom", "engine": engine, "gpu": "L4"})
         assert response.status_code == 200
-        assert f"KV cache: {cache}" in response.text
+        assert f"KV cache：{cache}" in response.text
 
 
 async def test_exl3_review_explains_gpu_requirement_and_vram_limits(console):
     _, client, _ = console
-    for gpu, expected in [("CPU", "GPU required"), ("T4", "Exceeds VRAM")]:
+    for gpu, expected in [("CPU", "需要 GPU"), ("T4", "超出 VRAM")]:
         response = await client.post("/ui/new/estimate", headers={"X-CSRF-Token": CSRF},
                                      data={"preset": "qwen38-27b-abl-exl3-4bpw", "gpu": gpu})
         assert response.status_code == 200
         assert expected in response.text
-        assert "llama.cpp will offload" not in response.text and "runs on the CPU" not in response.text
+        assert "llama.cpp 会把部分层卸载到 CPU" not in response.text and "在 CPU 上运行" not in response.text
 
 
 async def test_metrics_run_sql_save_export(console):
@@ -139,7 +140,7 @@ async def test_metrics_run_sql_save_export(console):
     response = await client.post("/ui/metrics/sql", data={"sql": "SELECT COUNT(*) AS n FROM requests"}, headers=headers)
     assert response.status_code == 200 and "<td>1</td>" in response.text
     response = await client.post("/ui/metrics/sql", data={"sql": "DELETE FROM requests"}, headers=headers)
-    assert "SQL error" in response.text
+    assert "SQL 出错" in response.text
 
 
 async def test_settings_save_and_toast_feed(console):
@@ -157,7 +158,7 @@ async def test_settings_save_and_toast_feed(console):
     first = (await client.get("/ui/toasts?after=-1")).json()
     assert first["toasts"] == [] and first["last"] > 0
     feed = (await client.get("/ui/toasts?after=0")).json()
-    assert any("is ready" in cursor["title"] for cursor in feed["toasts"])
+    assert any("已就绪" in cursor["title"] for cursor in feed["toasts"])
 
 
 async def test_gpu_checkboxes_save_multiple_selections_and_allow_none(console):
@@ -376,7 +377,7 @@ async def test_malformed_json_is_rejected_before_new_api_operations(console, mon
                                            headers={"X-CSRF-Token": CSRF, "Content-Type": "application/json"})
                          for endpoint in endpoints]
             assert [response.status_code for response in responses] == [409] * len(endpoints)
-            assert all(response.json()["error"] == "invalid JSON body" for response in responses)
+            assert all(response.json()["error"] == "请求体不是有效的 JSON" for response in responses)
     assert not any(operation.called for operation in operations)
 
 
@@ -451,27 +452,27 @@ async def test_new_session_keeps_an_explicit_class_and_offers_one_that_fits(cons
     assert inputs["CPU"] == (True, False)
     response = await client.post("/ui/new/estimate", headers={"X-CSRF-Token": CSRF},
                                  data={"preset": "qwen38-27b-q4km", "gpu": "CPU"})
-    assert response.status_code == 200 and "CPU cannot run this configuration" in response.text
+    assert response.status_code == 200 and "CPU 无法运行此配置" in response.text
     marker = re.search(r'id="gpu-fit" hidden data-fit="([^"]*)" data-suggest="([^"]*)"', response.text)
     fit = json.loads(html.unescape(marker.group(1)))
     assert marker.group(2) == "L4"
     assert fit["CPU"]["status"] == "blocked" and fit["L4"]["status"] != "blocked"
     response = await client.post("/ui/new/estimate", headers={"X-CSRF-Token": CSRF},
                                  data={"preset": "qwen38-27b-q4km", "gpu": "L4"})
-    assert 'data-suggest=""' in response.text and "cannot run this configuration" not in response.text
+    assert 'data-suggest=""' in response.text and "无法运行此配置" not in response.text
 
 
 async def test_measured_speeds_show_on_gpu_choices_review_and_models(console):
     _, client, _ = console
     page = (await client.get("/new?preset=qwen38-27b-abl-q4k")).text
     speeds = dict(re.findall(r'name="gpu" value="([A-Za-z0-9-]+)".*?class="cb-gpu-speed"[^>]*>([^<]*)<', page, re.S))
-    assert speeds["L4"] == "14.4 tok/s measured" and speeds["A100"] == "46.1 tok/s measured"
+    assert speeds["L4"] == "实测 14.4 tok/s" and speeds["A100"] == "实测 46.1 tok/s"
     assert speeds["CPU"] == ""  # No measurement for this preset on CPU.
     response = await client.post("/ui/new/estimate", headers={"X-CSRF-Token": CSRF},
                                  data={"preset": "qwen38-27b-abl-q4k", "gpu": "L4"})
-    assert "<dt>Measured</dt>" in response.text
-    assert ("<strong>14.4 tok/s</strong> generation, 808 tok/s prefill on a 4K-token prompt, on L4 at the "
-            "preset's defaults (2026-11-19). 3 warmed requests, b12359.") in response.text
+    assert "<dt>实测</dt>" in response.text
+    assert ("在 L4 上以预设默认参数运行：生成 <strong>14.4 tok/s</strong>，4K token 提示词预填充 808 tok/s"
+            "（2026-11-19）。3 warmed requests, b12359.") in response.text
     marker = re.search(r'id="gpu-fit" hidden data-fit="([^"]*)"', response.text)
     fit = json.loads(html.unescape(marker.group(1)))
     assert fit["G4"]["measured"]["gen"] == "67.8" and fit["CPU"]["measured"] is None
@@ -481,12 +482,12 @@ async def test_measured_speeds_show_on_gpu_choices_review_and_models(console):
     fit = json.loads(html.unescape(re.search(r'data-fit="([^"]*)"', response.text).group(1)))
     assert fit["CPU"]["status"] == "blocked" and fit["CPU"]["measured"]["gen"] == "0.028"
     models = (await client.get("/models")).text
-    assert "Measured <strong>14.4</strong> tok/s<br>Prefill 808 tok/s" in models
-    assert "Measured: engine-reported generation speed" in models
+    assert "实测 <strong>14.4</strong> tok/s<br>预填充 808 tok/s" in models
+    assert "实测：在预设默认参数下，由推理引擎报告的短提示词生成速度" in models
 
 
 async def test_exllamav3_create_on_cpu_is_refused(console):
     _, client, _ = console
     response = await client.post("/ui/actions/create", headers={"X-CSRF-Token": CSRF}, data={
         "name": "exl-cpu", "gpu": "CPU", "preset": "qwen38-27b-exl3-4bpw", "confirm": "yes"})
-    assert response.status_code == 409 and "requires a GPU runtime" in response.json()["error"]
+    assert response.status_code == 409 and "需要 GPU 运行时" in response.json()["error"]

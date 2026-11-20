@@ -76,10 +76,10 @@ class GoogleLogin:
     async def start(self, account_id: str | None = None) -> None:
         async with self._lock:
             if self.mode != "oauth2":
-                raise LoginError("ADC sign-in is managed by gcloud. Use Check account after configuring ADC.")
+                raise LoginError("ADC 登录由 gcloud 管理。配置好 ADC 后，请使用“检查账号”。")
             if not self.busy:
                 if self.sup.accounts is None:
-                    raise LoginError("Saved accounts are unavailable in this console.")
+                    raise LoginError("此控制台无法使用已保存的账号。")
                 if account_id:
                     try:
                         self.sup.accounts.get(account_id)
@@ -91,8 +91,8 @@ class GoogleLogin:
                     candidate.command()
                 except (OSError, ValueError):
                     self.sup.account_change_pending = False
-                    raise LoginError("Account profiles require the official google-colab-cli Python installation. "
-                                     "Check the installation guide.") from None
+                    raise LoginError("账号配置需要官方 google-colab-cli 的 Python 安装。"
+                                     "请查看安装指南。") from None
                 self._begin("starting")
                 self._task = asyncio.create_task(self._login(candidate, account_id))
 
@@ -108,9 +108,9 @@ class GoogleLogin:
     async def switch(self, account_id: str) -> None:
         async with self._lock:
             if self.mode != "oauth2" or self.sup.accounts is None:
-                raise LoginError("Saved account switching is available with OAuth2 authentication.")
+                raise LoginError("只有使用 OAuth2 认证时才能切换已保存的账号。")
             if self.busy:
-                raise LoginError("Finish or cancel the current sign-in before switching accounts.")
+                raise LoginError("请先完成或取消当前登录，再切换账号。")
             await self.sup.begin_account_change()
             self._changing = True
             try:
@@ -118,7 +118,7 @@ class GoogleLogin:
                 usage = await candidate.usage()
                 email = await candidate.identity() if usage else None
                 if not email or email.casefold() != self.sup.accounts.get(account_id)["email"].casefold():
-                    raise LoginError("This account could not be verified. Sign in with Google again.")
+                    raise LoginError("无法验证此账号。请重新使用 Google 登录。")
                 await self.sup.activate_account(account_id, candidate, usage,
                                                 lambda: self.sup.accounts.select(account_id))
                 self.email, self.balance = email, usage.balance
@@ -126,18 +126,18 @@ class GoogleLogin:
             except ValueError as exc:
                 raise LoginError(str(exc)) from None
             except OSError:
-                raise LoginError("The Colab CLI could not run. Check its installation and path.") from None
+                raise LoginError("Colab CLI 无法运行。请检查其安装和路径。") from None
             finally:
                 self._changing = self.sup.account_change_pending = False
 
     async def logout(self, account_id: str) -> None:
         async with self._lock:
             if self.sup.accounts is None or self.mode != "oauth2":
-                raise LoginError("Log out of ADC using gcloud auth application-default revoke.")
+                raise LoginError("请使用 gcloud auth application-default revoke 退出 ADC。")
             if self.busy:
-                raise LoginError("Finish or cancel the current sign-in before logging out.")
+                raise LoginError("请先完成或取消当前登录，再退出登录。")
             if account_id != self.sup.account_id or not account_id:
-                raise LoginError("The active account changed. Refresh Settings before logging out.")
+                raise LoginError("当前账号已变更。请刷新设置页后再退出登录。")
             await self.sup.begin_account_change()
             try:
                 await self.sup.activate_account(None, self.cli.for_profile(None, enabled=False), None,
@@ -149,21 +149,21 @@ class GoogleLogin:
     async def submit(self, flow_id: str, code: str) -> None:
         async with self._lock:
             if flow_id != self.flow_id or self.state != "waiting" or self._proc is None:
-                raise LoginError("This sign-in is no longer waiting for a code. "
-                                 "Start again or check the current account.")
+                raise LoginError("此登录已不再等待授权码。"
+                                 "请重新开始，或检查当前账号。")
             if not code.strip() or len(code) > 4096 or any(char in code for char in ("\n", "\r", "\0")):
-                raise LoginError("Paste a single authorization code from Google's completion page.")
+                raise LoginError("请粘贴 Google 完成页上的一个授权码。")
             self.state, self.url = "verifying", None
             try:
                 self._proc.stdin.write(code.strip().encode() + b"\n")
                 await self._proc.stdin.drain()
             except (BrokenPipeError, ConnectionResetError):
-                raise LoginError("The sign-in process ended. Start sign-in again.") from None
+                raise LoginError("登录进程已结束。请重新登录。") from None
 
     async def cancel(self, flow_id: str) -> None:
         async with self._lock:
             if flow_id != self.flow_id:
-                raise LoginError("This sign-in has already been replaced. Refresh the account card.")
+                raise LoginError("此登录已被新的登录取代。请刷新账号卡片。")
             self.state = "cancelling"
             await self.close()
             self.state, self.url, self.error = "cancelled", None, None
@@ -181,13 +181,13 @@ class GoogleLogin:
                         expected_account: str | None = None) -> None:
         self.email = await cli.identity()
         if not self.email and self.mode == "oauth2":
-            raise LoginError("The account email could not be verified. Check your connection and sign in again.")
+            raise LoginError("无法验证账号邮箱。请检查网络连接后重新登录。")
         self.balance = usage.balance
         if added:
             if expected_account:
                 expected = self.sup.accounts.get(expected_account)["email"]
                 if expected.casefold() != self.email.casefold():
-                    raise LoginError(f"Choose {expected} to sign in to this saved account.")
+                    raise LoginError(f"请选择 {expected} 来登录此已保存的账号。")
             if expected_account and expected_account == self.sup.account_id:
                 repaired = self.cli.for_profile(self.cli.profile)
                 await self.sup.activate_account(expected_account, repaired, usage,
@@ -200,7 +200,7 @@ class GoogleLogin:
             if self.sup.accounts and self.email and self.mode == "oauth2":
                 current = next((row for row in self.sup.accounts.rows if row["id"] == self.sup.account_id), None)
                 if current and current["email"].casefold() != self.email.casefold():
-                    raise LoginError("The CLI account changed outside this console. Sign in with Google again.")
+                    raise LoginError("CLI 账号已在此控制台之外被更改。请重新使用 Google 登录。")
                 self.sup.accounts.remember(self.email, cli)
             self.sup.usage, self.sup.usage_at = usage, self.sup.now()
         self.state, self.url, self.error = "connected", None, None
@@ -210,14 +210,14 @@ class GoogleLogin:
             async with self.sup._listing_lock:
                 usage = await self.cli.usage()
                 if usage is None:
-                    self._fail("Account access could not be verified. Sign in with Google or check your connection.")
+                    self._fail("无法验证账号访问权限。请使用 Google 登录，或检查网络连接。")
                 else:
                     await self._verified(usage, self.cli)
             await self.sup.resume_account_sessions()
         except LoginError as exc:
             self._fail(str(exc))
         except OSError:
-            self._fail("The Colab CLI could not run. Check its installation and path.")
+            self._fail("Colab CLI 无法运行。请检查其安装和路径。")
 
     async def _login(self, cli: ColabCLI, expected_account: str | None = None) -> None:
         proc = None
@@ -229,13 +229,13 @@ class GoogleLogin:
                 while chunk := await proc.stdout.read(1024):
                     output.extend(chunk)
                     if len(output) > MAX_OUTPUT:
-                        raise LoginError("The CLI returned unexpected output. Check its version and try again.")
+                        raise LoginError("CLI 返回了意外的输出。请检查其版本后重试。")
                     transcript = output.decode(errors="replace")
                     if self.state == "starting" and PROMPT in transcript:
                         self.url = google_url(transcript)
                         if not self.url:
-                            raise LoginError("The CLI did not provide a supported Google sign-in URL. "
-                                             "Check its version.")
+                            raise LoginError("CLI 没有提供受支持的 Google 登录链接。"
+                                             "请检查其版本。")
                         parsed = urlsplit(self.url)
                         query = [(key, value) for key, value in parse_qsl(parsed.query) if key != "prompt"]
                         query.append(("prompt", "select_account consent"))
@@ -245,16 +245,16 @@ class GoogleLogin:
                 usage = parse_usage(output.decode(errors="replace")) if result == 0 else None
                 output.clear()
                 if usage is None:
-                    raise LoginError("Google sign-in could not be completed. The code may be invalid or expired; "
-                                     "start again and check your connection.")
+                    raise LoginError("无法完成 Google 登录。授权码可能无效或已过期；"
+                                     "请重新开始并检查网络连接。")
                 self.state, self.url = "verifying", None
                 await self._verified(usage, cli, added=True, expected_account=expected_account)
         except TimeoutError:
-            error = "This sign-in expired after waiting for Google. Start sign-in again."
+            error = "等待 Google 超时，此登录已过期。请重新登录。"
         except ValueError as exc:
             error = str(exc)
         except OSError:
-            error = "The Colab CLI could not run. Check its installation and path."
+            error = "Colab CLI 无法运行。请检查其安装和路径。"
         finally:
             if proc is not None:
                 if proc.stdin:

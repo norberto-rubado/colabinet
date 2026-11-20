@@ -214,7 +214,7 @@ def test_preset_rejects_non_boolean_vision_settings(tmp_path, key, value):
     preset_file = tmp_path / "presets.toml"
     preset_file.write_text("[[preset]]\nid='a'\nengine='exllamav3'\nlabel='x'\nrepo='r'\nrevision='main'\n"
                            f"{key}={value}\n")
-    with pytest.raises(PresetError, match=f"{key} must be a boolean"):
+    with pytest.raises(PresetError, match=f"{key} 必须是布尔值"):
         load_presets(preset_file)
 
 

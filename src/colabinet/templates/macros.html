@@ -78,7 +78,7 @@ hx-boost="true" hx-target="#cb-view" hx-select="#cb-view > *" hx-select-oob="#cm
 {%- elif state == 'stopped' -%}{%- set tone = 'neutral' -%}
 {%- else -%}{%- set tone = 'progress' -%}{%- endif -%}
 <span class="badge cb-state" data-tone="{{ tone }}" title="{{ progress or '' }}">
-  {%- if unconfirmed %}stop not confirmed{% else %}{{ state | replace('_', ' ') }}{% endif -%}
+  {%- if unconfirmed %}停止未确认{% else %}{{ state | replace('_', ' ') }}{% endif -%}
 </span>
 {%- endmacro %}
 

@@ -44,6 +44,6 @@ cbPlaygroundSend().then(() => process.stdout.write(JSON.stringify(elements['pg-m
     assert result.returncode == 0, result.stderr
     metrics = json.loads(result.stdout)
     assert "TTFT 10.00 s" in metrics
-    assert "engine 10.0 t/s" in metrics
-    assert "end-to-end 5.0 t/s" in metrics
-    assert "total 20.00 s" in metrics
+    assert "推理引擎 10.0 t/s" in metrics
+    assert "端到端 5.0 t/s" in metrics
+    assert "总计 20.00 s" in metrics

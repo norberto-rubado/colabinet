@@ -1,6 +1,6 @@
-{% set creation = creation | default({'exit_code': none, 'output': '', 'error': 'Creation output was not retained. See the lifecycle events below for any saved error.'}) %}
-<div class="cb-log-head"><h3>Creation log</h3>
-<p class="cb-muted">{% if creation.exit_code is not none %}Exit code {{ creation.exit_code }} · {% endif %}Retained CLI output, up to 65,536 characters. Credentials are redacted.</p></div>
+{% set creation = creation | default({'exit_code': none, 'output': '', 'error': '未保留创建输出。如有已保存的错误，请查看下方的生命周期事件。'}) %}
+<div class="cb-log-head"><h3>创建日志</h3>
+<p class="cb-muted">{% if creation.exit_code is not none %}退出码 {{ creation.exit_code }} · {% endif %}保留的 CLI 输出，最多 65,536 个字符，凭据已脱敏。</p></div>
 <pre class="cb-log">{% if creation.output %}{{ creation.output }}{% elif creation.error %}{{ creation.error }}
 
-Full CLI output was not captured for this attempt.{% else %}No creation output captured yet. Output is saved when colab new exits.{% endif %}</pre>
+本次尝试未捕获完整的 CLI 输出。{% else %}尚未捕获创建输出。colab new 退出时会保存输出。{% endif %}</pre>

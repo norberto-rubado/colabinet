@@ -40,7 +40,7 @@ async def test_session_resources_are_available_on_every_detail_tab(console):
         assert 'id="session-watch"' in response.text
     response = await client.get(f"/ui/sessions/{sid}/resources")
     assert response.status_code == 200
-    for label in ("CPU", "RAM", "Disk", "GPU", "VRAM", "Last received"):
+    for label in ("CPU", "内存", "磁盘", "GPU", "VRAM", "最近接收于"):
         assert label in response.text
 
 
@@ -73,7 +73,7 @@ async def test_watch_refreshes_a_sample_without_extending_idle(console):
     assert (await world.store.session(sid))["last_activity"] == last_activity
     response = await client.get(f"/ui/sessions/{sid}/resources")
     assert "NVIDIA L4" in response.text
-    assert "Live" in response.text
+    assert "运行中" in response.text
 
 
 async def test_browser_polling_does_not_exec_once_per_request(console):
@@ -132,10 +132,10 @@ async def test_stopped_session_freezes_resources_and_removes_live_controls(conso
     response = await client.post(f"/ui/sessions/{sid}/watch", headers={"X-CSRF-Token": CSRF})
     assert response.status_code == 204
     response = await client.get(f"/ui/sessions/{sid}/resources")
-    assert "Session ended" in response.text
+    assert "会话已结束" in response.text
     response = await client.get(f"/ui/sessions/{sid}/controls")
     assert "stopped" in response.text
-    assert "Restart engine" not in response.text
+    assert "重启推理引擎" not in response.text
     assert "cbConfirmStop" not in response.text
     assert len(world.fake.calls("exec")) == previous_calls
 
@@ -150,7 +150,7 @@ async def test_log_tools_download_retained_lines_and_events(console):
     await world.sup._status(row)
     await world.store.event(world.sup.now(), "vm:download", session_id=sid, gb=1)
     response = await client.get(f"/sessions/{sid}?tab=logs")
-    assert "Pause" in response.text and "Auto-scroll" in response.text and "Download" in response.text
+    assert "暂停" in response.text and "自动滚动" in response.text and "下载" in response.text
     response = await client.get(f"/ui/sessions/{sid}/logs")
     assert "&lt;script&gt;not HTML&lt;/script&gt;" in response.text
     response = await client.get(f"/ui/sessions/{sid}/logs.txt")
@@ -212,7 +212,7 @@ async def test_resources_are_marked_stale_without_a_fresh_sample(console):
     world.sup.clock.now = lambda: future
     response = await client.get(f"/ui/sessions/{sid}/resources")
     assert response.status_code == 200
-    assert "Stale" in response.text
+    assert "数据过期" in response.text
 
 
 async def test_observed_sampling_does_not_exec_a_reused_session_name(console):

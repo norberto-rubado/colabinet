@@ -63,7 +63,7 @@ return await evaluate(`(async () => {
   const status = document.getElementById('session-status');
   const endpoint = document.getElementById('ep-url');
   const card = endpoint.closest('.card');
-  const counter = Array.from(status.querySelectorAll('dt')).find((node) => node.textContent === 'Up / cost')
+  const counter = Array.from(status.querySelectorAll('dt')).find((node) => node.textContent === '运行时长 / 成本')
     .nextElementSibling;
   const counterText = counter.textContent;
   const counterNode = counter.firstChild;
@@ -90,7 +90,7 @@ return await evaluate(`(async () => {
     });
   });
   observer.disconnect();
-  const updated = Array.from(status.querySelectorAll('dt')).find((node) => node.textContent === 'Up / cost')
+  const updated = Array.from(status.querySelectorAll('dt')).find((node) => node.textContent === '运行时长 / 成本')
     .nextElementSibling;
   return { counterChanged: updated.textContent !== counterText, counterNodeKept: updated.firstChild === counterNode,
     endpointKept: document.getElementById('ep-url') === endpoint,
@@ -112,8 +112,8 @@ return await evaluate(`(async () => {
   const table = target.querySelector('table');
   const row = table.querySelector('tbody tr');
   const name = row.querySelector('strong');
-  const open = Array.from(row.querySelectorAll('a')).find((node) => node.textContent === 'Reconfigure');
-  const column = Array.from(table.querySelectorAll('thead th')).findIndex((node) => node.textContent.trim() === 'Up');
+  const open = Array.from(row.querySelectorAll('a')).find((node) => node.textContent === '重新配置');
+  const column = Array.from(table.querySelectorAll('thead th')).findIndex((node) => node.textContent.trim() === '运行时长');
   const counter = row.children[column].firstChild;
   const oldCounter = counter.nodeValue;
   open.focus();
@@ -189,7 +189,7 @@ return await evaluate(`(async () => {
     badge: document.getElementById('session-state').textContent.trim(),
     actions: document.querySelectorAll('#session-controls button, #session-controls a').length,
     endpointKept: document.getElementById('ep-url') === endpoint,
-    resourcesEnded: document.getElementById('session-resources').textContent.includes('Session ended') };
+    resourcesEnded: document.getElementById('session-resources').textContent.includes('会话已结束') };
 })()`);
 """)
     assert result == {"controlsKept": True, "stateKept": True, "state": "stopped", "badge": "stopped",
@@ -207,7 +207,7 @@ return await evaluate(`(async () => {
   for (let attempt = 0; attempt < 100 && target.querySelectorAll('tbody tr').length !== 2; attempt++)
     await new Promise((resolve) => setTimeout(resolve, 50));
   const original = Array.from(target.querySelectorAll('tbody tr'));
-  const open = Array.from(original[0].querySelectorAll('a')).find((node) => node.textContent === 'Reconfigure');
+  const open = Array.from(original[0].querySelectorAll('a')).find((node) => node.textContent === '重新配置');
   const response = await fetch('/api/sessions', { method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.body.dataset.csrf },
     body: JSON.stringify(CREATE_REQUEST),

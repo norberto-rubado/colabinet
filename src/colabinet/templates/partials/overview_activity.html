@@ -1,14 +1,16 @@
 {% from "macros.html" import empty, nav_attrs %}
+{% set event_labels = {'created': '已创建', 'vm_created': 'VM 已创建', 'tunnel_started': '隧道已建立', 'reconfigure': '重新配置', 'external_stopped': '外部运行时已停止', 'stop_pending': '正在停止', 'stop_unconfirmed': '停止未确认', 'stop_confirmed': '已确认停止', 'finish_message': '结束信息', 'foreign_vm_stopped': '陌生 VM 已停止', 'guard': '扣点保护'} %}
+{% set vm_labels = {'download': '下载中', 'download_done': '下载完成', 'install_done': '安装完成', 'server_ready': '服务已就绪', 'gpu_info': 'GPU 信息', 'error': '错误', 'storage_check': '存储检查', 'setup_task_start': '设置任务开始', 'setup_task_done': '设置任务完成', 'setup_task_failed': '设置任务失败', 'parallel_setup_start': '并行设置开始', 'parallel_setup_done': '并行设置完成', 'setup_prepare_done': '设置准备完成', 'setup_finalize_done': '设置收尾完成', 'drafting_selected': '已选择推测解码', 'drafting_done': '推测解码就绪', 'engine_prebuilt_fallback': '预编译推理引擎不可用，已回退', 'table_warm': '表预热完成'} %}
 {% if overview_data.activity %}
 <ol class="cb-feed">
 {% for event in overview_data.activity %}
   <li><time>{{ event.ts | when }}</time>
     <span>{% if event.colab_name %}<a href="/sessions/{{ event.session_id }}" {{ nav_attrs() }}>{{ event.colab_name }}</a> {% endif %}
     {%- if event.kind == 'state' %}{{ event.detail.frm | replace('_', ' ') }} → <strong>{{ event.detail.to | replace('_', ' ') }}</strong>{% if event.detail.stop_reason %} <span class="cb-muted">({{ event.detail.stop_reason }})</span>{% endif %}
-    {%- elif event.kind.startswith('vm:') %}{{ event.kind[3:] | replace('_', ' ') }}{% if event.detail.get('seconds') is not none %} <span class="cb-muted">· {{ event.detail.seconds }} s</span>{% endif %}{% if event.detail.get('gb') %} <span class="cb-muted">· {{ event.detail.gb }} GB</span>{% endif %}
-    {%- else %}{{ event.kind | replace('_', ' ') }}{% if event.detail.reason %} <span class="cb-muted">· {{ event.detail.reason }}</span>{% endif %}{% if event.detail.gpu %} <span class="cb-muted">· {{ event.detail.gpu }}</span>{% endif %}{% endif %}</span></li>
+    {%- elif event.kind.startswith('vm:') %}{{ vm_labels.get(event.kind[3:], event.kind[3:] | replace('_', ' ')) }}{% if event.detail.get('seconds') is not none %} <span class="cb-muted">· {{ event.detail.seconds }} s</span>{% endif %}{% if event.detail.get('gb') %} <span class="cb-muted">· {{ event.detail.gb }} GB</span>{% endif %}
+    {%- else %}{{ event_labels.get(event.kind, event.kind | replace('_', ' ')) }}{% if event.detail.reason %} <span class="cb-muted">· {{ event.detail.reason }}</span>{% endif %}{% if event.detail.gpu %} <span class="cb-muted">· {{ event.detail.gpu }}</span>{% endif %}{% endif %}</span></li>
 {% endfor %}
 </ol>
 {% else %}
-{{ empty("Nothing yet", "Session events appear here as they happen.", "activity") }}
+{{ empty("暂无活动", "会话事件发生后会显示在这里。", "activity") }}
 {% endif %}

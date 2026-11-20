@@ -147,8 +147,8 @@ class Supervisor:
             rows = await self.store.sessions(OPEN_ROWS)
             if rows and not (reconnect == self.account_id and reconnect
                              and all(row["account_id"] == reconnect for row in rows)):
-                raise CreateRefused("Stop all managed sessions and wait for confirmed termination before "
-                                    "adding, switching, or logging out of an account.")
+                raise CreateRefused("请先停止所有托管会话，并等到确认已终止，"
+                                    "再添加、切换或退出账号。")
             self.account_change_pending = True
 
     async def activate_account(self, account_id: str | None, cli: ColabCLI, usage: Usage | None,
@@ -158,7 +158,7 @@ class Supervisor:
             rows = await self.store.sessions(OPEN_ROWS)
             if rows and not (reconnect and account_id == self.account_id
                              and all(row["account_id"] == account_id for row in rows)):
-                raise CreateRefused("Stop all managed sessions before changing accounts.")
+                raise CreateRefused("请先停止所有托管会话，再更换账号。")
             cli.command()  # validate the launcher before persisting a changed account
             selected = save()
             self.account_id = selected if selected is not None else account_id
@@ -188,7 +188,7 @@ class Supervisor:
 
     def _own_account(self, row: dict | None) -> None:
         if row and (self.account_id is None or row["account_id"] != self.account_id):
-            raise CreateRefused("Switch to the account that owns this session in Settings.")
+            raise CreateRefused("请在设置中切换到拥有此会话的账号。")
 
     async def fresh_listing(self) -> Listing:
         async with self._listing_lock:
@@ -240,7 +240,7 @@ class Supervisor:
         try:
             await self.proxies.bind(sid, row["proxy_port"], app)
         except OSError as e:
-            self.alerts.raise_("proxy_port", f"{row['colab_name']}: cannot listen on port {row['proxy_port']}: {e}",
+            self.alerts.raise_("proxy_port", f"{row['colab_name']}：无法监听端口 {row['proxy_port']}：{e}",
                                sid)
 
     def _wake_session(self, sid: int, *, probe_health: bool = True) -> None:
@@ -303,22 +303,22 @@ class Supervisor:
     # ---------------------------------------------------------------------------------------------- create
     def _run_spec(self, req: CreateRequest) -> RunSpec:
         if req.refusal_projection is not None and type(req.refusal_projection) is not bool:
-            raise CreateRefused("refusal_projection must be a boolean or null")
+            raise CreateRefused("refusal_projection 必须是布尔值或 null")
         if req.preset_id:
             if isinstance(self.presets, PresetError):
-                raise CreateRefused(f"presets.toml is invalid: {self.presets}")
+                raise CreateRefused(f"presets.toml 无效：{self.presets}")
             preset = self.presets.presets.get(req.preset_id)
             if not preset:
-                raise CreateRefused(f"unknown preset {req.preset_id!r}")
+                raise CreateRefused(f"未知预设 {req.preset_id!r}")
             return RunSpec.from_preset(preset, req.gpu_class, self.presets.engines, ctx=req.ctx, kv=req.kv,
                                        parallel=req.parallel, extra_args=tuple(req.extra_args) or None,
                                        refusal_projection=req.refusal_projection)
         if req.engine not in self.engines:
-            raise CreateRefused(f"unknown engine {req.engine!r}")
+            raise CreateRefused(f"未知推理引擎 {req.engine!r}")
         if req.engine in ("llamacpp", "strata") and not (req.repo and req.file):
-            raise CreateRefused(f"a custom {req.engine} model needs a Hugging Face repo and a GGUF file")
+            raise CreateRefused(f"自定义 {req.engine} 模型需要 Hugging Face 仓库和 GGUF 文件")
         if req.engine == "exllamav3" and not (req.repo and req.revision):
-            raise CreateRefused("a custom ExLlamaV3 model needs a Hugging Face repo and a revision (e.g. 4.00bpw)")
+            raise CreateRefused("自定义 ExLlamaV3 模型需要 Hugging Face 仓库和 revision（例如 4.00bpw）")
         pins = {} if isinstance(self.presets, PresetError) else self.presets.engines.get(req.engine, {})
         release = pins.get("release") or (f"{pins['wheel']}@{pins['tabbyapi_commit']}"
                                            if pins.get("wheel") and pins.get("tabbyapi_commit") else None)
@@ -336,19 +336,19 @@ class Supervisor:
 
     def _validate_spec(self, spec: RunSpec, gpu_class: str) -> None:
         if spec.engine not in self.engines:
-            raise CreateRefused(f"engine {spec.engine!r} is not available")
+            raise CreateRefused(f"推理引擎 {spec.engine!r} 不可用")
         if spec.ctx <= 0 or spec.parallel <= 0:
-            raise CreateRefused("context and parallel slots must be positive")
+            raise CreateRefused("上下文和并行槽位数必须为正数")
         if type(spec.refusal_projection) is not bool:
-            raise CreateRefused("refusal_projection must be a boolean")
+            raise CreateRefused("refusal_projection 必须是布尔值")
         if spec.engine == "exllamav3" and gpu_class == "CPU":
-            raise CreateRefused("ExLlamaV3 requires a GPU runtime")
+            raise CreateRefused("ExLlamaV3 需要 GPU 运行时")
         if spec.engine != "strata":
             if spec.refusal_projection:
-                raise CreateRefused("experimental refusal projection is supported only by Strata")
+                raise CreateRefused("只有 Strata 支持实验性拒答投影")
             return
         if gpu_class == "CPU":
-            raise CreateRefused("Strata requires a GPU runtime")
+            raise CreateRefused("Strata 需要 GPU 运行时")
         try:
             self.engines["strata"].validate_spec(spec)
         except ValueError as exc:
@@ -384,9 +384,9 @@ class Supervisor:
                 parsed = kind(value)
                 if kind in (int, float):
                     if not math.isfinite(parsed):
-                        raise CreateRefused(f"{key} must be finite")
+                        raise CreateRefused(f"{key} 必须是有限数值")
                     if parsed < 0:
-                        raise CreateRefused(f"{key} can't be negative")
+                        raise CreateRefused(f"{key} 不能为负数")
                 raw = str(parsed)
             validated[key] = raw
         await self.store.set_settings(validated)
@@ -408,31 +408,31 @@ class Supervisor:
 
     async def create(self, req: CreateRequest) -> int:
         if not req.confirm:
-            raise CreateRefused("creating a session spends compute units: pass confirm=true")
+            raise CreateRefused("创建会话会消耗计算单元：请传入 confirm=true")
         if req.gpu_class not in GPU_CLASSES:
-            raise CreateRefused(f"unknown GPU class {req.gpu_class!r}")
+            raise CreateRefused(f"未知 GPU 规格 {req.gpu_class!r}")
         if req.vm_port == 8080 or not 1024 <= req.vm_port <= 65535:
-            raise CreateRefused("VM port must be 1024-65535 and not 8080 (taken on Colab VMs)")
+            raise CreateRefused("VM 端口必须在 1024-65535 之间且不能是 8080（Colab VM 已占用）")
         spec = self._run_spec(req)
         self._validate_spec(spec, req.gpu_class)
         cap = await self.cap_today()
         if cap > 0 and await self.spend_today() >= cap:
-            raise CreateRefused(f"today's spend reached the daily cap ({cap:.2f} CU); raise it for today to continue")
+            raise CreateRefused(f"今日消耗已达到每日上限（{cap:.2f} CU）；请提高今日上限后再继续")
         async with self._create_lock:
             if self.account_id is None or not self.cli.enabled or self.account_change_pending:
-                raise CreateRefused("Finish Google sign-in or select an account in Settings before creating a session.")
+                raise CreateRefused("请先完成 Google 登录，或在设置中选择账号，再创建会话。")
             listing = await self.fresh_listing()
             if not listing.trusted:
-                raise CreateRefused("could not get a trusted `colab sessions` + `colab usage` listing; try again")
+                raise CreateRefused("无法获取可信的 `colab sessions` + `colab usage` 列表；请重试")
             if listing.named(req.name):
-                raise CreateRefused(f"a runtime named {req.name!r} is already listed; `colab new` would orphan it")
+                raise CreateRefused(f"已存在名为 {req.name!r} 的运行时；`colab new` 会让它变成无人管理的孤儿运行时")
             if await self.store.name_in_use(req.name):
-                raise CreateRefused(f"name {req.name!r} is in use by another session")
+                raise CreateRefused(f"名称 {req.name!r} 已被另一个会话使用")
             live = await self.store.sessions(OPEN_ROWS)
             taken = {r["proxy_port"] for r in live} | self.proxies.ports()
             if req.proxy_port:
                 if req.proxy_port in taken or not port_free(req.proxy_port):
-                    raise CreateRefused(f"proxy port {req.proxy_port} is not free")
+                    raise CreateRefused(f"代理端口 {req.proxy_port} 已被占用")
                 proxy_port = req.proxy_port
             else:
                 proxy_port = first_free(self.s.proxy_port_start, self.s.proxy_port_start + 100, taken)
@@ -462,7 +462,7 @@ class Supervisor:
             try:
                 proc = await self.cli.spawn_new(req.name, req.gpu_class)
             except OSError as exc:
-                message = bounded_diagnostic(f"Could not launch colab new: {exc}")
+                message = bounded_diagnostic(f"无法启动 colab new：{exc}")
                 await self._update(sid, name_reserved=0, create_log=message)
                 await self._fail_create(row, message, listing)
                 return sid
@@ -482,8 +482,8 @@ class Supervisor:
     async def abandon(self, sid: int) -> None:
         row = await self.store.session(sid)
         if not row or row["state"] != "creating":
-            raise CreateRefused("only a session that is still creating can be abandoned")
-        await self._fail_create(row, "abandoned by the user", await self.fresh_listing())
+            raise CreateRefused("只能放弃仍在创建中的会话")
+        await self._fail_create(row, "已被用户放弃", await self.fresh_listing())
 
     async def _fail_create(self, row: dict[str, Any], message: str, listing: Listing) -> None:
         sid = row["id"]
@@ -493,8 +493,8 @@ class Supervisor:
         if run and run["status"] == "pending":
             await self.store.update_run(run["id"], status="failed", error=message)
         if listing.trusted and listing.usage and listing.usage.active_assignments > (row["assignments_before"] or 0):
-            self.alerts.raise_("create_orphan", f"{row['colab_name']}: a VM may have been created without a name - "
-                               "stop it in the Colab web UI", sid)
+            self.alerts.raise_("create_orphan", f"{row['colab_name']}：可能已创建了一台没有名称的 VM，"
+                               "请在 Colab 网页中停止它", sid)
         await self._finish(sid, "failed", None, vm_created=False, message=message)
 
     # ---------------------------------------------------------------------------------------------- driver
@@ -539,8 +539,8 @@ class Supervisor:
                 return None  # abandoned or stopped while `colab new` runs; _run_new still clears the name
             elapsed = self.now() - row["created_at"]
             if elapsed >= self.s.create_slow_s:
-                extra = " - you can Abandon it" if elapsed >= self.s.create_abandon_s else ""
-                self.alerts.raise_("create_slow", f"{name}: create is taking long ({elapsed / 60:.0f} min){extra}",
+                extra = "，可以放弃它" if elapsed >= self.s.create_abandon_s else ""
+                self.alerts.raise_("create_slow", f"{name}：创建耗时较长（{elapsed / 60:.0f} 分钟）{extra}",
                                    sid, actions=["abandon"] if extra else [])
             listing = await self.fresh_listing()
             rt = listing.named(name) if listing.trusted else None
@@ -563,14 +563,14 @@ class Supervisor:
         if endpoint is None and rc == 0:
             endpoint = await self._wait_endpoint(sid, name, self.s.endpoint_wait_s)
             if endpoint is None:
-                self.alerts.raise_("endpoint_missing", f"{name}: VM created but not listed - check `colab sessions`"
-                                   " or the Colab web UI", sid)
+                self.alerts.raise_("endpoint_missing", f"{name}：VM 已创建但未出现在列表中，请检查 `colab sessions`"
+                                   "或 Colab 网页", sid)
                 return None
         elif endpoint is None:
             listing = await self.fresh_listing()
             rt = listing.named(name) if listing.trusted else None
             if not rt:
-                await self._fail_create(cur, out.strip() or f"colab new exited {rc} without any output", listing)
+                await self._fail_create(cur, out.strip() or f"colab new 以退出码 {rc} 结束，没有任何输出", listing)
                 return None
             endpoint = rt.endpoint
         await self._update(sid, endpoint=endpoint)
@@ -632,7 +632,7 @@ class Supervisor:
     async def _gpu_check(self, row: dict[str, Any]) -> str:
         sid = row["id"]
         if self.now() - row["state_since"] > self.s.gpu_check_limit_s:
-            return await self._setup_failed(row, "the GPU check did not complete in time")
+            return await self._setup_failed(row, "GPU 检查未能按时完成")
         if not await self._prepare_vm(row):
             await asyncio.sleep(self.s.setup_poll_s)
             return "gpu_check"
@@ -647,10 +647,10 @@ class Supervisor:
         await self._settle_rate(await self.store.session(sid), cls)
         run = await self.store.current_run(sid)
         if cls == "CPU" and run and run["engine"] == "strata":
-            return await self._setup_failed(row, "Strata requires a GPU runtime; the detected runtime is CPU")
+            return await self._setup_failed(row, "Strata 需要 GPU 运行时；检测到的运行时是 CPU")
         if cls != row["gpu_requested"]:
-            self.alerts.raise_("gpu_mismatch", f"{row['colab_name']}: asked for {row['gpu_requested']}, got {cls} "
-                               f"({gpu.get('name') or 'no GPU'}) - Continue or Stop", sid,
+            self.alerts.raise_("gpu_mismatch", f"{row['colab_name']}：请求的是 {row['gpu_requested']}，分配到的是 {cls} "
+                               f"（{gpu.get('name') or '无 GPU'}），请选择继续或停止", sid,
                                actions=["gpu-continue", "stop"])
             return "gpu_mismatch"
         return "setting_up"
@@ -695,7 +695,7 @@ class Supervisor:
         run = await self.store.current_run(sid)
         if run:
             await self.store.update_run(run["id"], status="failed", error=message[:1000])
-        self.alerts.raise_("setup_failed", f"{row['colab_name']}: setup failed: {message[:200]}", sid,
+        self.alerts.raise_("setup_failed", f"{row['colab_name']}：设置失败：{message[:200]}", sid,
                            actions=["retry-setup", "stop"])
         return "setup_failed"
 
@@ -716,7 +716,7 @@ class Supervisor:
         if run["status"] != "started":
             for local, remote in engine.uploads(spec):
                 if not (await self.cli.upload(name, local, remote)).ok:
-                    return await self._setup_failed(row, f"upload of {local.name} failed")
+                    return await self._setup_failed(row, f"上传 {local.name} 失败")
             await self._update(sid, event_offset=0)
             row = await self.store.session(sid)
             started = await self.cli.exec_file(name, VM_DIR / "bg.py", env)
@@ -726,7 +726,7 @@ class Supervisor:
                 if not (probe and probe.get("events")):
                     started = await self.cli.exec_file(name, VM_DIR / "bg.py", env)
                     if not started.ok:
-                        return await self._setup_failed(row, f"could not start setup: {started.out[-200:]}")
+                        return await self._setup_failed(row, f"无法启动设置：{started.out[-200:]}")
             await self.store.update_run(run["id"], status="started")
         t0 = self.now()
         while True:
@@ -743,7 +743,7 @@ class Supervisor:
                     if nxt:
                         return nxt
             if self.now() - max(t0, row["state_since"]) > self.s.setup_limit_s:
-                return await self._setup_failed(row, "setup took longer than the setup limit")
+                return await self._setup_failed(row, "设置耗时超过了设置时限")
 
     async def _setup_event(self, row: dict[str, Any], run_id: int, ev: dict[str, Any]) -> str | None:
         sid, kind = row["id"], ev.get("event")
@@ -751,21 +751,21 @@ class Supervisor:
         run = await self.store.current_run(sid)
         if kind == "install_done":
             await self.store.update_run(run_id, install_s=ev.get("seconds"), engine_version=ev.get("release"))
-            self._view[sid]["progress"] = "downloading the model"
+            self._view[sid]["progress"] = "正在下载模型"
         elif kind == "download":
-            self._view[sid]["progress"] = (f"downloading {ev.get('file')} ({ev.get('done_gb')} GB, "
-                                           f"{ev.get('mb_s')} MB/s)")
+            self._view[sid]["progress"] = (f"正在下载 {ev.get('file')}（{ev.get('done_gb')} GB，"
+                                           f"{ev.get('mb_s')} MB/s）")
         elif kind == "download_done":
             await self.store.update_run(run_id, download_s=(run["download_s"] or 0) + (ev.get("seconds") or 0),
                                         download_gb=(run["download_gb"] or 0) + (ev.get("gb") or 0))
-            self._view[sid]["progress"] = "loading the model"
+            self._view[sid]["progress"] = "正在加载模型"
         elif kind == "server_ready":
             await self.store.update_run(run_id, load_s=ev.get("seconds"), vram_used_mib=ev.get("vram_used_mib"),
                                         status="ready")
-            self._view[sid]["progress"] = "connecting the tunnel"
+            self._view[sid]["progress"] = "正在连接隧道"
             return "tunnelling"
         elif kind == "error":
-            return await self._setup_failed(row, ev.get("message") or "setup error")
+            return await self._setup_failed(row, ev.get("message") or "设置出错")
         return None
 
     async def _safe_to_tunnel(self, row: dict[str, Any]) -> bool:
@@ -783,8 +783,8 @@ class Supervisor:
         if row["tunnel_pid"]:
             err = self.tunnels.last_error(name) or ""
             if "429" in err:
-                self.alerts.raise_("ssh_429", f"{name}: Colab allows one SSH connection per runtime - close any other "
-                                   f"`colab ssh -s {name}` (e.g. a terminal) so colabinet's tunnel can connect", sid)
+                self.alerts.raise_("ssh_429", f"{name}：Colab 每个运行时只允许一个 SSH 连接，请关闭其他 "
+                                   f"`colab ssh -s {name}`（例如某个终端），以便 colabinet 的隧道能够连接", sid)
         if not await self._safe_to_tunnel(row):
             return False
         await self.tunnels.stop(row["tunnel_pid"], name)
@@ -825,7 +825,7 @@ class Supervisor:
             self.alerts.clear(f"ssh_429:{sid}")
             return "ready"
         if self.now() - row["state_since"] > self.s.tunnel_alert_s:
-            self.alerts.raise_("tunnel_slow", f"{row['colab_name']}: the tunnel is not connecting", sid)
+            self.alerts.raise_("tunnel_slow", f"{row['colab_name']}：隧道无法连接", sid)
         await asyncio.sleep(min(self.s.setup_poll_s, self.s.keepalive_s))
         if self._sample_due(sid):
             await self._status(row)
@@ -845,7 +845,7 @@ class Supervisor:
         if st is not None:
             marker = st.get("marker") or {}
             if marker.get("session_id") != sid:
-                self.alerts.raise_("foreign_vm", f"{name}: the VM answering to this name is not ours - stopping it",
+                self.alerts.raise_("foreign_vm", f"{name}：使用此名称响应的 VM 不属于本会话，正在停止它",
                                    sid)
                 await self.stop(sid, "foreign_vm", foreign=True)
                 return None
@@ -857,7 +857,7 @@ class Supervisor:
             else:
                 self._unhealthy[sid] = self._unhealthy.get(sid, 0) + 1
                 if self._unhealthy[sid] >= 2 and row["state"] == "ready":
-                    self.alerts.raise_("engine_down", f"{name}: the engine stopped answering", sid,
+                    self.alerts.raise_("engine_down", f"{name}：推理引擎已停止响应", sid,
                                        actions=["retry-setup", "stop"])
                     return "engine_down"
         if not self.tunnels.alive(row["tunnel_pid"], name) or not await self._healthy(row):
@@ -883,7 +883,7 @@ class Supervisor:
         self._own_account(row)
         expected = {"continue": "gpu_mismatch", "retry": ("setup_failed", "engine_down")}[decision]
         if not row or row["state"] not in (expected if isinstance(expected, tuple) else (expected,)):
-            raise CreateRefused(f"session is {row['state'] if row else 'missing'}; nothing to {decision}")
+            raise CreateRefused(f"会话状态为 {row['state'] if row else 'missing'}，无需执行 {decision}")
         run = await self.store.current_run(sid)
         old = json.loads(run["spec_json"])
         self._validate_spec(RunSpec(**{**old, "extra_args": tuple(old["extra_args"])}),
@@ -911,12 +911,12 @@ class Supervisor:
                                   kv: str | None, extra_args: tuple[str, ...] | None,
                                   refusal_projection: bool | None) -> int:
         if refusal_projection is not None and type(refusal_projection) is not bool:
-            raise CreateRefused("refusal_projection must be a boolean or null")
+            raise CreateRefused("refusal_projection 必须是布尔值或 null")
         row = await self.store.session(sid)
         self._own_account(row)
         if not row or row["state"] not in ("ready", "engine_down", "setup_failed"):
-            raise CreateRefused(f"only a ready, engine-down or setup-failed session can be reconfigured "
-                                f"(this one is {row['state'] if row else 'missing'})")
+            raise CreateRefused(f"只有已就绪、推理引擎已停止或设置失败的会话才能重新配置"
+                                f"（当前状态为 {row['state'] if row else 'missing'}）")
         run = await self.store.current_run(sid)
         old = json.loads(run["spec_json"])
         old["extra_args"] = tuple(old["extra_args"])
@@ -924,10 +924,10 @@ class Supervisor:
                      "refusal_projection": refusal_projection}
         if preset_id and preset_id != old.get("preset_id"):
             if isinstance(self.presets, PresetError):
-                raise CreateRefused(f"presets.toml is invalid: {self.presets}")
+                raise CreateRefused(f"presets.toml 无效：{self.presets}")
             preset = self.presets.presets.get(preset_id)
             if not preset:
-                raise CreateRefused(f"unknown preset {preset_id!r}")
+                raise CreateRefused(f"未知预设 {preset_id!r}")
             if overrides["extra_args"] == ():  # an empty form field keeps the new preset's own engine args
                 overrides["extra_args"] = None
             spec = RunSpec.from_preset(preset, row["gpu_class"] or row["gpu_requested"], self.presets.engines,
@@ -945,7 +945,7 @@ class Supervisor:
             spec_json=json.dumps(dataclasses.asdict(spec)),
         )
         await self._event(sid, "reconfigure", run_id=run_id, ctx=spec.ctx, kv=spec.kv, model=spec.alias)
-        self._view.setdefault(sid, {}).update(run_id=run_id, progress="reconfiguring")
+        self._view.setdefault(sid, {}).update(run_id=run_id, progress="正在重新配置")
         self.alerts.clear_session(sid, {"engine_down", "setup_failed"})
         await self._transition(sid, "reconfiguring")
         self._start_driver(sid)
@@ -961,14 +961,14 @@ class Supervisor:
     async def stop_external(self, name: str, expected_account: str | None = None) -> None:
         async with self._create_lock:
             if expected_account is not None and expected_account != self.account_id:
-                raise CreateRefused("The active account changed. Refresh Overview before stopping this runtime.")
+                raise CreateRefused("当前账号已变更。请刷新概览后再停止此运行时。")
             if self.account_id is None or self.account_change_pending:
-                raise CreateRefused("Finish the account change in Settings first.")
+                raise CreateRefused("请先在设置中完成账号变更。")
             if await self.store.name_in_use(name):
-                raise CreateRefused(f"{name!r} is a managed session: stop it by id")
+                raise CreateRefused(f"{name!r} 是托管会话：请通过会话 id 停止它")
             listing = await self.fresh_listing()
             if not (listing.trusted and listing.named(name)):
-                raise CreateRefused(f"no listed runtime named {name!r}")
+                raise CreateRefused(f"列表中没有名为 {name!r} 的运行时")
             await self.cli.stop(name)
             await self._event(None, "external_stopped", name=name, account_id=self.account_id)
 
@@ -983,7 +983,7 @@ class Supervisor:
         if row is None or row["state"] in ("stopped", "failed", "stopping"):
             return
         if not self.cli.enabled:
-            raise CreateRefused("Sign in again to this session's Google account in Settings before stopping it.")
+            raise CreateRefused("请先在设置中重新登录此会话所属的 Google 账号，再停止它。")
         if row["state"] == "creating":
             self._pending_stop[sid] = reason  # can't stop by name until the VM is listed (safe stop rule)
             await self._event(sid, "stop_pending", reason=reason)
@@ -1016,8 +1016,8 @@ class Supervisor:
         await self._update(sid, state="stopped", state_since=self.now(), stop_unconfirmed=1)
         await self._event(sid, "stop_unconfirmed")
         await self.proxies.unbind(sid)
-        self.alerts.raise_("stop_unconfirmed", f"{name}: stop not confirmed - may still be billing. Try "
-                           f"`colab stop -s {name}`; colabinet keeps retrying", sid)
+        self.alerts.raise_("stop_unconfirmed", f"{name}：停止未确认，可能仍在计费。可尝试 "
+                           f"`colab stop -s {name}`；colabinet 会持续重试", sid)
 
     async def _retry_unconfirmed(self, row: dict[str, Any], listing: Listing) -> None:
         sid, name, endpoint = row["id"], row["colab_name"], row["endpoint"]
@@ -1030,8 +1030,8 @@ class Supervisor:
         elif ours.name == name:
             await self.cli.stop(name)
         else:  # our VM lost its name ("[?]"): a by-name stop can't reach it any more
-            self.alerts.raise_("stop_unconfirmed", f"{name}: still billing but no longer stoppable by name - stop it "
-                               "in the Colab web UI", sid)
+            self.alerts.raise_("stop_unconfirmed", f"{name}：仍在计费，但已无法按名称停止，请在 "
+                               "Colab 网页中停止它", sid)
             if self.now() - (row["last_exec_ok"] or row["created_at"]) > billing.RECLAIM_S:
                 await self._close(sid, row, "unreachable", vm_created=True)
                 await self._update(sid, stop_unconfirmed=0)
@@ -1095,15 +1095,15 @@ class Supervisor:
                         await self._transition(sid, "gpu_check")
                         self._start_driver(sid)
                 elif row["new_exit"] == 0:
-                    self.alerts.raise_("endpoint_missing", f"{name}: VM created but not listed", sid)
+                    self.alerts.raise_("endpoint_missing", f"{name}：VM 已创建但未出现在列表中", sid)
                 else:
                     self._misses[sid] = self._misses.get(sid, 0) + 1
                     if self._misses[sid] >= 2:
-                        await self._fail_create(row, "colab new did not complete (found after restart)", listing)
+                        await self._fail_create(row, "colab new 未完成（重启后发现）", listing)
                 continue
             named = listing.named(name)
             if named and row["endpoint"] and named.endpoint != row["endpoint"]:
-                self.alerts.raise_("foreign_vm", f"{name}: another VM now uses this name - stopping it", sid)
+                self.alerts.raise_("foreign_vm", f"{name}：另一台 VM 正在使用此名称，正在停止它", sid)
                 await self.cli.stop(name)  # the VM under our NAME is not ours (e.g. auto-created); stop it
                 await self._event(sid, "foreign_vm_stopped", endpoint=named.endpoint)
             if any(r.endpoint == row["endpoint"] for r in listing.runtimes):
@@ -1118,19 +1118,19 @@ class Supervisor:
                 continue
             seen.add(rt.endpoint)
             if rt.name:
-                self.alerts.raise_("external_runtime", f"runtime {rt.name!r} ({rt.hardware}) is billing but not "
-                                   "managed by colabinet", key=f"external:{rt.endpoint}", actions=["stop-external"],
+                self.alerts.raise_("external_runtime", f"运行时 {rt.name!r}（{rt.hardware}）正在计费，但不由 "
+                                   "colabinet 管理（外部运行时）", key=f"external:{rt.endpoint}", actions=["stop-external"],
                                    target=rt.name)
             else:
-                self.alerts.raise_("unknown_runtime", f"an unnamed runtime {rt.endpoint} ({rt.hardware}) is billing - "
-                                   "stop it in the Colab web UI", key=f"external:{rt.endpoint}")
+                self.alerts.raise_("unknown_runtime", f"一个未命名的运行时 {rt.endpoint}（{rt.hardware}）正在计费，"
+                                   "请在 Colab 网页中停止它", key=f"external:{rt.endpoint}")
         for alert in self.alerts.list():
             if alert.key.startswith("external:") and alert.key.split(":", 1)[1] not in seen:
                 self.alerts.clear(alert.key)
         hidden = listing.usage.active_assignments - len(listing.runtimes) if listing.usage else 0
         if hidden > 0:
-            self.alerts.raise_("unknown_runtime", f"{hidden} billing assignment(s) are not shown by `colab sessions` - "
-                               "check the Colab web UI", key="assignments_hidden")
+            self.alerts.raise_("unknown_runtime", f"有 {hidden} 个计费中的分配未在 `colab sessions` 中显示，"
+                               "请检查 Colab 网页", key="assignments_hidden")
         else:
             self.alerts.clear("assignments_hidden")
 
@@ -1148,7 +1148,7 @@ class Supervisor:
                 await self._event(sid, "guard", reason=d.reason, message=d.message)
                 await self.stop(sid, d.reason)
             elif d.action == "warn":
-                self.alerts.raise_("idle_warn", f"{row['colab_name']}: {d.message}", sid, actions=["keep"])
+                self.alerts.raise_("idle_warn", f"{row['colab_name']}：{d.message}", sid, actions=["keep"])
             else:
                 self.alerts.clear(f"idle_warn:{sid}")
             if act and act.last > (row["last_activity"] or 0):
@@ -1174,8 +1174,8 @@ class Supervisor:
                 await self.store.set_setting(key, str(usage.balance))
             threshold = float(await self.store.get_setting("low_balance_cu", str(self.s.low_balance_cu)))
             if usage.balance < threshold:
-                self.alerts.raise_("low_balance", f"balance is {usage.balance:.2f} CU (below {threshold:.0f}); at 0 "
-                                   "Colab applies free-tier rules and SSH stops working", key="low_balance")
+                self.alerts.raise_("low_balance", f"余额为 {usage.balance:.2f} CU（低于 {threshold:.0f}）；余额为 0 时 "
+                                   "Colab 会按免费版规则处理，SSH 将无法使用", key="low_balance")
             else:
                 self.alerts.clear("low_balance")
 
@@ -1206,8 +1206,8 @@ class Supervisor:
                                "run_id": run["id"] if run else None, "engine": run["engine"] if run else None}
             if not self.cli.enabled:
                 self._paused_for_account.add(sid)
-                self.alerts.raise_("account_reconnect", "Google credentials are missing. Sessions may still bill. "
-                                   "Use Settings → Google accounts → Sign in again for their owning account.",
+                self.alerts.raise_("account_reconnect", "缺少 Google 凭据，会话可能仍在计费。"
+                                   "请在 设置 → Google 账号 中为会话所属账号重新登录。",
                                    key="account_reconnect")
                 continue
             if state == "stopping":

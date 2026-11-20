@@ -90,15 +90,15 @@ def create_app(sup: Supervisor, token: str, ui_port: int, csrf: str | None = Non
     @app.middleware("http")
     async def local_only(request: Request, call_next):
         if request.headers.get("host") not in hosts:
-            return JSONResponse({"error": "request rejected: Host must be 127.0.0.1 or localhost"}, 403)
+            return JSONResponse({"error": "请求被拒绝：Host 必须是 127.0.0.1 或 localhost"}, 403)
         if request.method not in SAFE_METHODS:
             origin = request.headers.get("origin")
             if origin is not None and origin not in origins:
-                return JSONResponse({"error": "request rejected: cross-site Origin"}, 403)
+                return JSONResponse({"error": "请求被拒绝：跨站 Origin"}, 403)
             api_ok = hmac.compare_digest(request.headers.get("x-colabinet-token", ""), token)
             csrf_ok = bool(csrf) and hmac.compare_digest(request.headers.get("x-csrf-token", ""), csrf or "")
             if not (api_ok or csrf_ok):
-                return JSONResponse({"error": "request rejected: missing or wrong X-Colabinet-Token / X-CSRF-Token"},
+                return JSONResponse({"error": "请求被拒绝：缺少 X-Colabinet-Token / X-CSRF-Token 或其值错误"},
                                     403)
         return await call_next(request)
 

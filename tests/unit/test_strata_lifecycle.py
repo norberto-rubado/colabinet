@@ -263,7 +263,7 @@ def test_custom_strata_toml_round_trips_file_and_gpu_vision(supervisor, tmp_path
 async def test_projection_opt_in_cannot_switch_to_a_non_strata_engine(supervisor):
     sid = await seed_run(supervisor)
     before = await supervisor.store.current_run(sid)
-    with pytest.raises(CreateRefused, match="only by Strata"):
+    with pytest.raises(CreateRefused, match="只有 Strata 支持"):
         await supervisor.reconfigure(sid, preset_id="qwen38-27b-abl-exl3-4bpw", refusal_projection=True)
     assert await supervisor.store.current_run(sid) == before
     supervisor._cancel_driver.assert_not_awaited()

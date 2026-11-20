@@ -76,45 +76,45 @@ def load_presets(path: Path) -> Presets:
     try:
         data = tomllib.loads(Path(path).read_text())
     except FileNotFoundError as e:
-        raise PresetError(f"{path} not found") from e
+        raise PresetError(f"未找到 {path}") from e
     except tomllib.TOMLDecodeError as e:
         raise PresetError(f"{path}: {e}") from e
     presets: dict[str, Preset] = {}
     for i, raw in enumerate(data.get("preset", [])):
-        where = f"preset #{i + 1}"
+        where = f"第 {i + 1} 个预设"
         for key in ("id", "engine", "label", "repo"):
             if not raw.get(key):
-                raise PresetError(f"{where}: missing '{key}'")
+                raise PresetError(f"{where}：缺少 '{key}'")
         if raw["engine"] not in KNOWN_ENGINES:
-            raise PresetError(f"{where}: unknown engine {raw['engine']!r}")
+            raise PresetError(f"{where}：未知推理引擎 {raw['engine']!r}")
         if raw["engine"] in ("llamacpp", "strata") and not raw.get("file"):
-            raise PresetError(f"{where}: {raw['engine']} presets need 'file'")
+            raise PresetError(f"{where}：{raw['engine']} 预设需要 'file'")
         if raw["engine"] == "exllamav3" and not raw.get("revision"):
-            raise PresetError(f"{where}: exllamav3 presets need 'revision' (the bitrate branch, e.g. 4.00bpw)")
+            raise PresetError(f"{where}：exllamav3 预设需要 'revision'（码率分支，例如 4.00bpw）")
         for key in ("vision", "vision_offload", "refusal_projection"):
             if key in raw and not isinstance(raw[key], bool):
-                raise PresetError(f"{where}: {key} must be a boolean (true or false)")
+                raise PresetError(f"{where}：{key} 必须是布尔值（true 或 false）")
         if raw.get("refusal_projection") and raw["engine"] != "strata":
-            raise PresetError(f"{where}: refusal_projection is supported only by Strata")
+            raise PresetError(f"{where}：只有 Strata 支持 refusal_projection")
         if raw["id"] in presets:
-            raise PresetError(f"{where}: duplicate id {raw['id']!r}")
+            raise PresetError(f"{where}：id {raw['id']!r} 重复")
         fields = {k: v for k, v in raw.items() if k not in ("gpu", "evidence", "measured")}
         try:
             gpu = {}
             for name, values in raw.get("gpu", {}).items():
                 extra = values.get("extra_args", [])
                 if not isinstance(extra, list) or not all(isinstance(item, str) for item in extra):
-                    raise ValueError(f"gpu.{name}.extra_args must be a list of strings")
+                    raise ValueError(f"gpu.{name}.extra_args 必须是字符串列表")
                 gpu[name] = GpuDefaults(**{**GpuDefaults().__dict__, **values, "extra_args": tuple(extra)})
             evidence = {k: GpuEvidence(**v) for k, v in raw.get("evidence", {}).items()}
             if any(e.status not in ("tested", "reported", "build_only") for e in evidence.values()):
-                raise ValueError("evidence status must be tested, reported or build_only")
+                raise ValueError("evidence status 必须是 tested、reported 或 build_only")
             measured = {k: Measured(**v) for k, v in raw.get("measured", {}).items()}
             for name, speed in measured.items():
                 if not all(isinstance(value, (int, float)) and value > 0
                            for value in (speed.gen_tps, speed.prefill_tps) if value is not None):
-                    raise ValueError(f"measured.{name}: gen_tps and prefill_tps must be positive numbers")
+                    raise ValueError(f"measured.{name}：gen_tps 和 prefill_tps 必须是正数")
             presets[raw["id"]] = Preset(**fields, gpu=gpu, evidence=evidence, measured=measured)
         except (TypeError, ValueError) as e:
-            raise PresetError(f"{where}: {e}") from e
+            raise PresetError(f"{where}：{e}") from e
     return Presets(engines=data.get("engines", {}), presets=presets)

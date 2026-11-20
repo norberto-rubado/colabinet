@@ -1,27 +1,28 @@
 {% from "macros.html" import icon, nav_attrs %}
+{% set alert_labels = {'account_reconnect': '需要重新连接账号', 'create_orphan': '可能有遗留 VM', 'create_slow': '创建缓慢', 'daily_cap': '每日上限', 'endpoint_missing': '端点缺失', 'engine_down': '推理引擎无响应', 'external_runtime': '外部运行时', 'foreign_vm': '陌生 VM', 'gpu_mismatch': 'GPU 不符', 'idle_warn': '即将闲置自动停止', 'low_balance': '余额不足', 'preflight': '启动前检查', 'proxy_port': '代理端口', 'setup_failed': '设置失败', 'ssh_429': 'SSH 连接受限', 'stop_unconfirmed': '停止未确认', 'tunnel_slow': '隧道连接缓慢', 'unknown_runtime': '未知运行时'} %}
 {% if overview_data.alerts %}
 <section class="cb-attention">
-  <div class="cb-section-head"><h2 class="cb-section-title">Needs attention</h2><span class="cb-count" data-tone="danger">{{ overview_data.alerts | length }}</span></div>
+  <div class="cb-section-head"><h2 class="cb-section-title">需要处理</h2><span class="cb-count" data-tone="danger">{{ overview_data.alerts | length }}</span></div>
   {% for alert in overview_data.alerts %}
   <div class="alert" data-cb-key="alert-{{ alert.key }}" data-variant="{{ 'destructive' if alert.level == 'critical' else 'warning' }}">
     {{ icon('alert') }}
-    <h2>{{ alert.kind | replace('_', ' ') }}</h2>
+    <h2>{{ alert_labels.get(alert.kind, alert.kind | replace('_', ' ')) }}</h2>
     <section>
       <p>{{ alert.message }}</p>
       {% if alert.actions %}
       <div class="cb-row">
         {% for act in alert.actions %}
           {% if act in ('stop',) and alert.session_id %}
-          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="destructive" onclick="cbConfirmStop({{ alert.session_id }}, 'session {{ alert.session_id }}')">Stop</button>
+          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="destructive" onclick="cbConfirmStop({{ alert.session_id }}, '会话 {{ alert.session_id }}')">停止</button>
           {% elif act in ('keep', 'abandon', 'gpu-continue', 'retry-setup') and alert.session_id %}
-          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ alert.session_id }}/{{ act }}" {% if act in ('gpu-continue', 'retry-setup') %}hx-confirm="Continue setup on this billing VM?" hx-vals='{"confirm":"yes"}'{% endif %} hx-swap="none">{{ {'keep': 'Keep +idle', 'abandon': 'Abandon', 'gpu-continue': 'Continue', 'retry-setup': 'Retry setup'}[act] }}</button>
+          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ alert.session_id }}/{{ act }}" {% if act in ('gpu-continue', 'retry-setup') %}hx-confirm="要在这台正在计费的 VM 上继续设置吗？" hx-vals='{"confirm":"yes"}'{% endif %} hx-swap="none">{{ {'keep': '保持（延长闲置）', 'abandon': '放弃', 'gpu-continue': '继续', 'retry-setup': '重试设置'}[act] }}</button>
           {% elif act == 'extend-daily-cap' %}
-          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="outline" hx-post="/ui/actions/daily-cap/extend" hx-swap="none">+5 CU for today</button>
+          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="outline" hx-post="/ui/actions/daily-cap/extend" hx-swap="none">今日 +5 CU</button>
           {% elif act == 'stop-external' and alert.target %}
-          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="destructive" hx-post="/ui/actions/external/{{ alert.target }}/stop" hx-vals='{{ {"confirm": "yes", "account_id": overview_data.account_id} | tojson | forceescape }}' hx-confirm="Stop the unmanaged runtime {{ alert.target }}? It is not managed by colabinet." hx-swap="none">Stop {{ alert.target }}</button>
+          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="destructive" hx-post="/ui/actions/external/{{ alert.target }}/stop" hx-vals='{{ {"confirm": "yes", "account_id": overview_data.account_id} | tojson | forceescape }}' hx-confirm="要停止非托管运行时 {{ alert.target }} 吗？它不受 colabinet 管理。" hx-swap="none">停止 {{ alert.target }}</button>
           {% endif %}
         {% endfor %}
-        {% if alert.session_id %}<a class="btn" data-size="sm" data-variant="ghost" href="/sessions/{{ alert.session_id }}" {{ nav_attrs() }}>Open</a>{% endif %}
+        {% if alert.session_id %}<a class="btn" data-size="sm" data-variant="ghost" href="/sessions/{{ alert.session_id }}" {{ nav_attrs() }}>打开</a>{% endif %}
       </div>
       {% endif %}
     </section>

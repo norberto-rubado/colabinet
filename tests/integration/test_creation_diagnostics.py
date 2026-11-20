@@ -52,20 +52,20 @@ async def test_failed_creation_is_visible_in_console_and_download(world):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:7860') as client:
         for path in (f'/sessions/{sid}', f'/ui/sessions/{sid}/status'):
             response = await client.get(path)
-            assert 'Session creation failed' in response.text
+            assert '会话创建失败' in response.text
             assert 'QuotaError: accelerator A100 unavailable' in response.text
             assert f'/sessions/{sid}?tab=logs' in response.text
             assert '<script>alert' not in response.text
         for path in ('/ui/overview/sessions', '/ui/sessions/table?tab=all'):
             response = await client.get(path)
             assert response.status_code == 200
-            assert 'View error' in response.text
+            assert '查看错误' in response.text
             assert 'QuotaError: accelerator A100 unavailable' in response.text
             assert f'/sessions/{sid}' in response.text
         response = await client.get(f'/sessions/{sid}?tab=logs')
-        assert 'Creation log' in response.text
+        assert '创建日志' in response.text
         assert 'Traceback (most recent call last):' in response.text
-        assert 'Exit code 1' in response.text
+        assert '退出码 1' in response.text
         assert '<script>alert' not in response.text
         download = await client.get(f'/ui/sessions/{sid}/logs.txt')
         assert 'Traceback (most recent call last):' in download.text

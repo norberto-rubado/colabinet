@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 LOG_LIMIT = 65536
-TRUNCATED = "[Earlier creation output truncated; showing the retained tail.]\n"
+TRUNCATED = "[较早的创建输出已截断，仅显示保留的末尾部分。]\n"
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 AUTH = re.compile(r"\b(Bearer|Basic)\s+[^\s\"',;}]+", re.I)
@@ -47,7 +47,7 @@ def _json_fragments(text: str, depth: int) -> str:
             search_from = start + 1
             continue
         except RecursionError:
-            return "".join(parts) + text[cursor:start] + "[Deeply nested diagnostic JSON omitted.]"
+            return "".join(parts) + text[cursor:start] + "[已省略嵌套过深的诊断 JSON。]"
         redacted = _json_value(parsed, depth)
         if redacted != parsed:
             parts.extend((text[cursor:start], json.dumps(redacted, ensure_ascii=False)))

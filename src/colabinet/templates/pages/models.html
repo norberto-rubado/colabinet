@@ -6,11 +6,11 @@
 {%- elif engine != 'strata' and f.verdict in ('tight', 'spills', 'unknown') -%}warning
 {%- else -%}neutral{%- endif -%}
 {%- endmacro %}
-{% block title %}Models{% endblock %}
-{% block crumbs %}<h1>Models</h1><span class="cb-page-note">presets from presets.toml</span>{% endblock %}
-{% block actions %}<button class="btn" data-size="sm" data-variant="outline" hx-post="/ui/actions/presets/reload" hx-swap="none">{{ icon('refresh') }}Reload presets</button>{% endblock %}
+{% block title %}模型{% endblock %}
+{% block crumbs %}<h1>模型</h1><span class="cb-page-note">来自 presets.toml 的预设</span>{% endblock %}
+{% block actions %}<button class="btn" data-size="sm" data-variant="outline" hx-post="/ui/actions/presets/reload" hx-swap="none">{{ icon('refresh') }}重新加载预设</button>{% endblock %}
 {% block content %}
-{% if models_context.error %}<div class="alert" data-variant="destructive">{{ icon('alert') }}<h2>presets.toml has an error</h2><section><p>{{ models_context.error }}</p></section></div>{% endif %}
+{% if models_context.error %}<div class="alert" data-variant="destructive">{{ icon('alert') }}<h2>presets.toml 有错误</h2><section><p>{{ models_context.error }}</p></section></div>{% endif %}
 {% for item in models_context.presets %}{% set preset = item.p %}
 <section class="card cb-preset">
   <header>
@@ -20,46 +20,46 @@
         <h2>{{ preset.label }}</h2>
         <div class="cb-preset-tags">
           <span class="badge" data-tone="info">{{ preset.engine }}</span>
-          {% if preset.weights_gb %}<span class="badge" data-tone="neutral">{{ preset.weights_gb | num(1) }} GB {{ 'download (not VRAM residency)' if preset.engine == 'strata' else 'weights' }}</span>{% endif %}
+          {% if preset.weights_gb %}<span class="badge" data-tone="neutral">{{ preset.weights_gb | num(1) }} GB {{ '下载量（非 VRAM 驻留）' if preset.engine == 'strata' else '权重' }}</span>{% endif %}
           {% if preset.licence %}<span class="badge" data-tone="neutral">{{ preset.licence }}</span>{% endif %}
         </div>
         <p><code>{{ preset.repo }}</code>{% if preset.file %} · {{ preset.file }}{% endif %}{% if preset.revision %} @ {{ preset.revision }}{% endif %}</p>
       </div>
-      <a class="btn" data-size="sm" href="/new?preset={{ preset.id }}" {{ nav_attrs() }}>{{ icon('rocket') }}Launch…</a>
+      <a class="btn" data-size="sm" href="/new?preset={{ preset.id }}" {{ nav_attrs() }}>{{ icon('rocket') }}启动…</a>
     </div>
   </header>
   <section>
-    <div class="cb-fit-caption"><h3>{{ 'GPU evidence' if preset.engine == 'strata' else 'fit (preset defaults)' }}</h3></div>
+    <div class="cb-fit-caption"><h3>{{ 'GPU 实测依据' if preset.engine == 'strata' else '适配（预设默认值）' }}</h3></div>
     <div class="cb-fit-grid">
       {% for f in item.fit %}
       <div class="cb-fit-cell" title="{{ f.message }}">
         <strong>{{ f.gpu }}</strong>
         <span class="badge" data-tone="{{ fit_tone(f, preset.engine) }}">{{ f.label }}</span>
-        {% if not (preset.engine in ('exllamav3', 'strata') and f.gpu == 'CPU') %}<span class="cb-muted">Context: {{ (f.ctx // 1024) }}K<br>KV cache: {{ f.kv }}</span>
-        {% if f.kv_unknown %}<span class="cb-muted">KV memory unknown</span>{% endif %}{% endif %}
-        {% if f.measured %}<span class="cb-fit-speed" title="{{ f.measured.detail }}">Measured <strong>{{ f.measured.gen }}</strong> tok/s{% if f.measured.prefill %}<br>Prefill {{ f.measured.prefill }} tok/s{% endif %}</span>{% endif %}
+        {% if not (preset.engine in ('exllamav3', 'strata') and f.gpu == 'CPU') %}<span class="cb-muted">上下文：{{ (f.ctx // 1024) }}K<br>KV cache：{{ f.kv }}</span>
+        {% if f.kv_unknown %}<span class="cb-muted">KV 内存未知</span>{% endif %}{% endif %}
+        {% if f.measured %}<span class="cb-fit-speed" title="{{ f.measured.detail }}">实测 <strong>{{ f.measured.gen }}</strong> tok/s{% if f.measured.prefill %}<br>预填充 {{ f.measured.prefill }} tok/s{% endif %}</span>{% endif %}
       </div>
       {% endfor %}
     </div>
-    {% if preset.measured %}<p class="cb-footnote">{{ icon('info') }}<span>Measured: engine-reported generation speed on a short prompt and prefill on a 4K-token prompt at the preset's defaults{% set dates = preset.measured.values() | map(attribute='date') | select | unique | list %}{% if dates %} ({{ dates | join(', ') }}){% endif %}. Classes without a figure were not measured or could not run it.</span></p>{% endif %}
-    <p class="cb-footnote">{{ icon('info') }}<span>Context is the token limit; KV cache is separate from model weight quantization. {% if preset.engine == 'strata' and preset.repo == qwen36_repo %}Qwen3.6 places experts in VRAM and host RAM. This preset uses fixed FP32 KV and CPU vision.{% elif preset.engine == 'strata' %}Strata uses a GPU expert cache plus host RAM and a shared 28.8 GB PLE table; download size is not VRAM residency. Badges describe recorded GPU evidence, not estimated residency or a full-context guarantee.{% else %}Fit is advisory{% if preset.engine == 'llamacpp' %}; CPU offload needs sufficient host RAM{% endif %}{% if preset.mmproj or preset.vision %}; vision workspace is not included{% endif %}.{% endif %}</span></p>
+    {% if preset.measured %}<p class="cb-footnote">{{ icon('info') }}<span>实测：在预设默认参数下，由推理引擎报告的短提示词生成速度，以及 4K token 提示词的预填充速度{% set dates = preset.measured.values() | map(attribute='date') | select | unique | list %}{% if dates %}（{{ dates | join('、') }}）{% endif %}。没有数据的类型表示未测量或无法运行。</span></p>{% endif %}
+    <p class="cb-footnote">{{ icon('info') }}<span>上下文即 token 上限；KV cache 与模型权重量化相互独立。{% if preset.engine == 'strata' and preset.repo == qwen36_repo %}Qwen3.6 将专家放在 VRAM 和主机内存中。此预设使用固定的 FP32 KV 和 CPU 视觉。{% elif preset.engine == 'strata' %}Strata 使用 GPU 专家缓存加主机内存，以及一个共享的 28.8 GB PLE 表；下载量不等于 VRAM 驻留量。徽标表示已记录的 GPU 实测依据，而非估算的驻留量或完整上下文保证。{% else %}适配结果仅供参考{% if preset.engine == 'llamacpp' %}；CPU 卸载需要足够的主机内存{% endif %}{% if preset.mmproj or preset.vision %}；不含视觉工作区{% endif %}。{% endif %}</span></p>
     {% set benchmarks = preset.evidence.items() | selectattr('1.performance') | list %}
     <dl class="cb-kv cb-perf">
-      <dt>Local requests</dt><dd>{% for bucket in item.measured %}{{ bucket.gpu }}: <strong>{{ bucket.tps | num(1) }} t/s</strong> median ({{ bucket.n }} req, {{ bucket.out | num }} tokens out){% if not loop.last %} · {% endif %}{% else %}<span class="cb-muted">not used yet</span>{% endfor %}</dd>
-      {% for gpu, evidence in benchmarks %}<dt>Saved benchmarks · {{ gpu }}</dt><dd>{{ evidence.performance }}</dd>{% endfor %}
+      <dt>本地请求</dt><dd>{% for bucket in item.measured %}{{ bucket.gpu }}: <strong>{{ bucket.tps | num(1) }} t/s</strong> 中位数（{{ bucket.n }} 次请求，输出 {{ bucket.out | num }} token）{% if not loop.last %} · {% endif %}{% else %}<span class="cb-muted">尚未使用</span>{% endfor %}</dd>
+      {% for gpu, evidence in benchmarks %}<dt>已保存的基准测试 · {{ gpu }}</dt><dd>{{ evidence.performance }}</dd>{% endfor %}
     </dl>
-    {% if benchmarks %}<p class="cb-footnote">{{ icon('info') }}<span>Saved native decode rates exclude prompt processing and are separate from local requests. Each profile has one measured pass across the listed input lengths; settings and cache state differ. These samples do not establish a projection speedup. Expand Benchmark evidence for sources and setup details.</span></p>{% endif %}
-    {% if preset.evidence %}<details class="cb-details"><summary>Benchmark evidence</summary><dl class="cb-kv">{% for gpu, evidence in preset.evidence.items() %}<dt>{{ gpu }}</dt><dd>{{ evidence.message }}</dd>{% endfor %}</dl></details>{% endif %}
+    {% if benchmarks %}<p class="cb-footnote">{{ icon('info') }}<span>已保存的原生解码速率不含提示词处理，且与本地请求分开统计。每个配置在所列输入长度上只测量了一轮；设置和缓存状态各不相同。这些样本不能证明投影带来了加速。展开“基准测试依据”可查看来源和设置详情。</span></p>{% endif %}
+    {% if preset.evidence %}<details class="cb-details"><summary>基准测试依据</summary><dl class="cb-kv">{% for gpu, evidence in preset.evidence.items() %}<dt>{{ gpu }}</dt><dd>{{ evidence.message }}</dd>{% endfor %}</dl></details>{% endif %}
   </section>
 </section>
 {% else %}
-{% if not models_context.error %}<section class="card">{{ empty("No presets", "Add [[preset]] entries to presets.toml, then Reload presets.", "models") }}</section>{% endif %}
+{% if not models_context.error %}<section class="card">{{ empty("暂无预设", "在 presets.toml 中添加 [[preset]] 条目，然后重新加载预设。", "models") }}</section>{% endif %}
 {% endfor %}
 <section class="card">
-  <header>{{ card_title('Recently used custom models', 'layers') }}<p>Paste a snippet into presets.toml to make it a preset.</p></header>
+  <header>{{ card_title('最近使用的自定义模型', 'layers') }}<p>将片段粘贴到 presets.toml 即可将其设为预设。</p></header>
   <section>{% for custom_model in models_context.custom %}
-    <details class="cb-custom-model"><summary><strong>{{ custom_model.alias or custom_model.repo }}</strong> <span class="cb-muted">{{ custom_model.engine }} · {{ custom_model.repo }} · {{ custom_model.file_or_rev }} · last {{ custom_model.last | ago }}</span></summary>
+    <details class="cb-custom-model"><summary><strong>{{ custom_model.alias or custom_model.repo }}</strong> <span class="cb-muted">{{ custom_model.engine }} · {{ custom_model.repo }} · {{ custom_model.file_or_rev }} · 上次使用 {{ custom_model.last | ago }}</span></summary>
       <pre class="cb-log">{{ custom_model.toml }}</pre></details>
-  {% else %}<p class="cb-muted">None yet. Custom Hugging Face models you launch from New session appear here.</p>{% endfor %}</section>
+  {% else %}<p class="cb-muted">暂无。从“新建会话”启动的自定义 Hugging Face 模型会显示在这里。</p>{% endfor %}</section>
 </section>
 {% endblock %}

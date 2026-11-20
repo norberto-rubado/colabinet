@@ -63,7 +63,7 @@ async def test_live_table_with_a_live_session_shows_the_row(one_live):
     world, client = one_live
     body = await table(client, "live")
     assert "llm" in body
-    assert "Nothing is billing through colabinet." not in body
+    assert "当前没有通过 colabinet 计费的会话。" not in body
 
 
 async def test_whitespace_only_search_is_not_a_filter(one_live):
@@ -74,7 +74,7 @@ async def test_whitespace_only_search_is_not_a_filter(one_live):
     for query in (" ", "    ", "\t", "  \n "):
         body = await table(client, "live", query)
         assert "llm" in body, query
-        assert "Nothing is billing through colabinet." not in body, query
+        assert "当前没有通过 colabinet 计费的会话。" not in body, query
 
 
 async def test_padded_search_terms_still_match(one_live):
@@ -82,15 +82,15 @@ async def test_padded_search_terms_still_match(one_live):
     for query in (" llm ", "  LLM  ", " llm\t"):
         body = await table(client, "live", query)
         assert "llm" in body, query
-        assert "No sessions match" not in body, query
+        assert "没有会话匹配" not in body, query
 
 
 async def test_filter_miss_on_a_populated_tab_makes_no_billing_claim(one_live):
     world, client = one_live
     body = await table(client, "live", "no-such-session")
-    assert "No sessions match" in body
+    assert "没有会话匹配" in body
     # The live tab is populated and its session is billing; the copy must not deny that.
-    assert "Nothing is billing through colabinet." not in body
+    assert "当前没有通过 colabinet 计费的会话。" not in body
     assert "Sessions are still running" not in body
 
 
@@ -101,15 +101,15 @@ async def test_history_filter_miss_does_not_imply_live_billing(one_live):
     stopped = await table(client, "all")
     assert "stopped" in stopped
     body = await table(client, "history", "no-such-session")
-    assert "No sessions match" in body
-    assert "Nothing is billing through colabinet." not in body
+    assert "没有会话匹配" in body
+    assert "当前没有通过 colabinet 计费的会话。" not in body
     assert "Sessions are still running" not in body
 
 
 @pytest.mark.parametrize("tab,expected", [
-    ("live", "No live sessions"),
-    ("history", "No stopped sessions yet"),
-    ("all", "No sessions yet"),
+    ("live", "没有运行中的会话"),
+    ("history", "还没有已停止的会话"),
+    ("all", "还没有会话"),
 ])
 async def test_empty_database_stays_truthful_for_every_tab(empty_world, tab, expected):
     world, client = empty_world
@@ -118,7 +118,7 @@ async def test_empty_database_stays_truthful_for_every_tab(empty_world, tab, exp
     # than the filter-miss copy, which claims rows exist behind the filter.
     body = await table(client, tab, "no-such-session")
     assert expected in body
-    assert "No sessions match" not in body
+    assert "没有会话匹配" not in body
     assert "Sessions are still running" not in body
 
 
@@ -127,4 +127,4 @@ async def test_empty_database_without_a_query_is_still_truthful(empty_world):
     for tab in ("live", "history", "all"):
         body = await table(client, tab)
         assert "Sessions are still running" not in body, tab
-        assert "No sessions match" not in body, tab
+        assert "没有会话匹配" not in body, tab

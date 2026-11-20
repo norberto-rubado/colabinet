@@ -26,22 +26,22 @@ def evaluate(s: dict[str, Any], now: float, activity_last: float, grace_s: float
     if state in NO_GUARD_STATES:
         return Decision()
     if s.get("cu_cap") and session_cu(s, now) >= s["cu_cap"]:
-        return Decision("stop", "cu_cap", f"reached its CU cap ({s['cu_cap']:.2f} CU)")
+        return Decision("stop", "cu_cap", f"已达到 CU 上限（{s['cu_cap']:.2f} CU）")
     if s.get("deadline") and now >= s["deadline"]:
-        return Decision("stop", "deadline", "reached its deadline")
+        return Decision("stop", "deadline", "已到定时停止时间")
     if state == "setup_failed" and now - s["state_since"] >= grace_s:
-        return Decision("stop", "setup_failed", "setup failed and nobody retried")
+        return Decision("stop", "setup_failed", "设置失败且无人重试")
     if state == "gpu_mismatch" and now - s["state_since"] >= grace_s:
-        return Decision("stop", "gpu_mismatch", "got a different GPU and nobody chose Continue")
+        return Decision("stop", "gpu_mismatch", "分配到的 GPU 不符且无人选择继续")
     idle_min = s.get("idle_min") or 0
     if state in IDLE_STATES and idle_min > 0:
         last = max(activity_last, s.get("last_activity") or 0.0)
         idle = now - last
         limit = idle_min * 60
         if idle >= limit:
-            return Decision("stop", "idle", f"idle for {idle_min} min")
+            return Decision("stop", "idle", f"已闲置 {idle_min} 分钟")
         if idle >= limit - IDLE_WARN_S:
-            return Decision("warn", "idle", f"idle stop in {max(1, round((limit - idle) / 60))} min")
+            return Decision("warn", "idle", f"{max(1, round((limit - idle) / 60))} 分钟后闲置自动停止")
     return Decision()
 
 
@@ -50,7 +50,7 @@ def evaluate_daily(spend_today: float, cap: float) -> Decision:
     if cap <= 0:
         return Decision()
     if spend_today >= cap:
-        return Decision("stop", "daily_cap", f"today's spend {spend_today:.2f} CU reached the daily cap {cap:.2f} CU")
+        return Decision("stop", "daily_cap", f"今日消耗 {spend_today:.2f} CU，已达到每日上限 {cap:.2f} CU")
     if spend_today >= DAILY_WARN_FRACTION * cap:
-        return Decision("warn", "daily_cap", f"today's spend {spend_today:.2f} CU is over 80% of the cap {cap:.2f} CU")
+        return Decision("warn", "daily_cap", f"今日消耗 {spend_today:.2f} CU，已超过每日上限 {cap:.2f} CU 的 80%")
     return Decision()

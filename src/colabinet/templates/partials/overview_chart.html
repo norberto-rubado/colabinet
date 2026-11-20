@@ -6,5 +6,5 @@
   data-chart-data='{{ overview_data.cu_chart.rows | tojson }}' data-chart-series='{{ overview_data.cu_chart.series | tojson }}'
   data-chart-slots='{{ slots | tojson }}'></canvas></div>
 {% else %}
-{{ empty("No compute used yet", "Nothing ran in the last 14 days.", "coins") }}
+{{ empty("尚未使用计算单元", "最近 14 天没有任何运行。", "coins") }}
 {% endif %}
