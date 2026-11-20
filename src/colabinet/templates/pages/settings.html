@@ -32,6 +32,26 @@
     <dt>退出时</dt><dd>{{ '停止所有托管会话（--stop-on-exit）' if st.stop_on_exit else '会话保持运行并继续计费（使用 --stop-on-exit 启动可在退出时停止托管会话）' }}</dd>
   </dl></section></section>
 </div>
+{% if gateway is defined %}
+<section class="card" id="gateway-card"><header>{{ card_title('对外 API', 'key') }}<p>一个地址、一把密钥访问所有已就绪会话，适用于 Cherry Studio、Magpie、curl 等兼容 OpenAI 的客户端；<code>model</code> 填会话的模型 ID 或会话名。</p></header>
+  <section>{% if gateway.enabled %}
+    <div class="cb-endpoint">
+      <div class="cb-copy-field"><span class="cb-copy-label">基础 URL</span><code id="gw-base">{{ gateway.base }}</code><button class="btn" data-size="sm" data-variant="ghost" aria-label="复制对外 API 基础 URL" onclick="cbCopy({{ gateway.base | tojson | forceescape }})">{{ icon('copy') }}复制</button></div>
+      <div class="cb-copy-field"><span class="cb-copy-label">API 密钥</span><code id="gw-key">{{ gateway.key_masked or '尚未生成' }}</code>{% if gateway.key %}<button class="btn" data-size="sm" data-variant="ghost" aria-label="复制 API 密钥" onclick="cbCopy({{ gateway.key | tojson | forceescape }}, '已复制 API 密钥')">{{ icon('copy') }}复制</button>{% endif %}</div>
+    </div>
+    <dl class="cb-kv">
+      <dt>本机监听</dt><dd><code>http://{{ gateway.listen }}/v1</code></dd>
+      <dt>密钥文件</dt><dd><code class="cb-path">{{ gateway.key_path }}</code></dd>
+      <dt>认证方式</dt><dd><code>Authorization: Bearer 密钥</code> 或 <code>x-api-key: 密钥</code></dd>
+    </dl>
+    <div class="cb-row"><strong>示例</strong>{% if gateway.key %}<button class="btn cb-right" data-size="sm" data-variant="outline" aria-label="复制 curl 示例" onclick="cbCopy(document.getElementById('gw-curl-full').textContent, '已复制 curl 示例')">{{ icon('copy') }}复制 curl</button>{% endif %}</div>
+    <pre><code id="gw-curl">{{ gateway.curl }}</code></pre>
+    <pre id="gw-curl-full" hidden>{{ gateway.curl_full }}</pre>
+  {% else %}
+    <p><span class="badge" data-tone="neutral">已关闭</span> 使用 <code>--gateway-port 端口</code> 启动 colabinet 即可开启（0 表示关闭）。</p>
+  {% endif %}</section>
+</section>
+{% endif %}
 <section class="card"><header>{{ card_title('GPU 费率', 'coins') }}<p>每小时 CU：初始值来自实测，之后每次创建后从 <code>colab usage</code> 学习更新。</p></header>
   <section><div class="table-container"><table class="table">
     <caption class="cb-visually-hidden">各 GPU 类型费率</caption>

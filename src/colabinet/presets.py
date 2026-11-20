@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 KNOWN_ENGINES = {"llamacpp", "exllamav3", "strata"}
 FALLBACK_CLASS = {"A100-80": "A100", "T4-HIGHMEM": "T4"}
@@ -12,6 +13,40 @@ FALLBACK_CLASS = {"A100-80": "A100", "T4-HIGHMEM": "T4"}
 
 class PresetError(ValueError):
     pass
+
+
+def _model_path(value: object) -> bool:
+    """A non-empty relative path that stays inside the model directory."""
+    if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
+        return False
+    parts = PurePosixPath(value).parts
+    return bool(parts) and all(part not in ("", ".", "..") for part in parts)
+
+
+def _llamacpp_fields(where: str, raw: dict) -> None:
+    """Validate the llama.cpp-only fields release, links and prewarm."""
+    for key in ("release", "links", "prewarm"):
+        if key in raw and raw["engine"] != "llamacpp":
+            raise PresetError(f"{where}：只有 llamacpp 预设支持 {key}")
+    if "release" in raw and not (isinstance(raw["release"], str) and re.fullmatch(r"b\d+", raw["release"])):
+        raise PresetError(f"{where}：release 必须是 llama.cpp 发布标签（例如 b12359）")
+    links = raw.get("links", {})
+    if not isinstance(links, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in links.items()):
+        raise PresetError(f"{where}：links 必须是“期望的文件名 = 仓库中的真实文件名”的字符串表")
+    for name, target in links.items():
+        for path in (name, target):
+            if not _model_path(path):
+                raise PresetError(f"{where}：links 中的 {path!r} 必须是模型目录内的相对路径")
+        if name == target:
+            raise PresetError(f"{where}：links 中的 {name!r} 不能指向自身")
+        if target in links:
+            raise PresetError(f"{where}：links 的目标 {target!r} 本身也是链接，不支持链式链接")
+    prewarm = raw.get("prewarm", [])
+    if not isinstance(prewarm, list) or not all(isinstance(item, str) for item in prewarm):
+        raise PresetError(f"{where}：prewarm 必须是字符串列表")
+    for path in prewarm:
+        if not _model_path(path):
+            raise PresetError(f"{where}：prewarm 中的 {path!r} 必须是模型目录内的相对路径")
 
 
 @dataclass(frozen=True)
@@ -59,6 +94,9 @@ class Preset:
     refusal_projection: bool = False  # Strata's experimental refusal-direction projection, opt-in.
     evidence: dict[str, GpuEvidence] = field(default_factory=dict)
     measured: dict[str, Measured] = field(default_factory=dict)
+    release: str | None = None  # llama.cpp release tag for this preset only, overrides engines.llamacpp.release
+    links: dict[str, str] = field(default_factory=dict)  # name llama.cpp expects -> real file in the same repo
+    prewarm: tuple[str, ...] = ()  # files read into the VM page cache after the server is healthy
 
     def defaults_for(self, gpu_class: str) -> GpuDefaults:
         generic = GpuDefaults(kv={"exllamav3": "FP16", "strata": "int8"}.get(self.engine, "f16"))
@@ -96,9 +134,14 @@ def load_presets(path: Path) -> Presets:
                 raise PresetError(f"{where}：{key} 必须是布尔值（true 或 false）")
         if raw.get("refusal_projection") and raw["engine"] != "strata":
             raise PresetError(f"{where}：只有 Strata 支持 refusal_projection")
+        _llamacpp_fields(where, raw)
         if raw["id"] in presets:
             raise PresetError(f"{where}：id {raw['id']!r} 重复")
         fields = {k: v for k, v in raw.items() if k not in ("gpu", "evidence", "measured")}
+        if "links" in fields:
+            fields["links"] = dict(fields["links"])
+        if "prewarm" in fields:
+            fields["prewarm"] = tuple(fields["prewarm"])
         try:
             gpu = {}
             for name, values in raw.get("gpu", {}).items():

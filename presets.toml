@@ -463,3 +463,77 @@ T4-HIGHMEM = { gen_tps = 53.335, prefill_tps = 760.3, date = "2026-11-19", note 
 L4 = { gen_tps = 65.41, prefill_tps = 1611.17, date = "2026-11-19", note = "3 warmed requests, Strata 0.1.60" }
 A100 = { gen_tps = 135.078, prefill_tps = 6402.96, date = "2026-11-19", note = "3 warmed requests, Strata 0.1.61" }
 A100-80 = { gen_tps = 139.787, prefill_tps = 6471.44, date = "2026-11-19", note = "3 warmed requests, Strata 0.1.61" }
+
+# ---------------------------------------------------------------------------------------------------------------
+# Uncensored picks from Chinese X/forum write-ups, each measured by us on a Colab G4 (RTX PRO 6000 96 GB, 176 GB
+# RAM) on 2026-11-20 with llama.cpp b12584 prebuilt, Xet high-performance download. gen = 700-token Chinese
+# story; prefill = ~4.8K-token prompt. Uncensored check: raw-socket SYN scanner request answered with code.
+# These models think at length by default: pass "chat_template_kwargs": {"enable_thinking": false} (GLM) /
+# {"thinking": false} (DeepSeek) for direct answers, or give a large max_tokens.
+
+[[preset]]
+id = "qwen38-flash-next-sc117-abl-iq3s"
+engine = "llamacpp"
+label = "Qwen3.8-Flash-Next 无审查 IQ3_S（SC117，全显存，1M 上下文可选）"
+repo = "SC117/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF"
+file = "IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00001-of-00002.gguf"
+alias = "qwen3.8-flash-next-abliterated"
+release = "b12584"
+weights_gb = 83.9
+licence = "Apache-2.0"
+parallel = 4
+# The 28.8 GB second shard is an n-gram table read lazily from mmap (crhywun/colab-llm 03_serve_flash_next).
+prewarm = ["IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00002-of-00002.gguf"]
+
+[preset.gpu.G4]
+ctx = 262144
+kv = "q8_0"
+extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "1024", "-ub", "512", "--cache-ram", "60000",
+              "-lm", "mmap", "--lazy-mode", "on"]
+
+[preset.measured]
+G4 = { gen_tps = 104.6, date = "2026-11-20", note = "实测：单请求（当时用 llama.cpp master 自编译）；muihbb 报告 8 并发总吞吐约 300 tok/s" }
+
+[[preset]]
+id = "dsv41-flash-coder-abl-iq2xxs-engram"
+engine = "llamacpp"
+label = "DeepSeek-V4.1-Flash 748B Coder 无审查 IQ2_XXS + 完整 Engram（Abiray）"
+repo = "Abiray/DeepSeek-V4.1-Flash-1017-Uncensored-GSQ-RCO-Coder-GGUF"
+file = "DeepSeek-V4.1-Flash-1017-Uncensored-GSQ-RCO-Coder-IQ2_XXS-00001-of-00006.gguf"
+alias = "deepseek-v4.1-flash-coder-uncensored"
+release = "b12584"
+# 72.1 GB backbone in VRAM + 110.6 GB Engram table memory-mapped from local disk and pre-read into page cache.
+weights_gb = 72.1
+licence = "MIT"
+parallel = 2
+links = { "DeepSeek-V4.1-Flash-1017-Uncensored-GSQ-RCO-Coder-IQ2_XXS-00006-of-00006.gguf" = "DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf" }
+prewarm = ["DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf"]
+
+[preset.gpu.G4]
+ctx = 131072
+kv = "q8_0"
+extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24"]
+
+[preset.measured]
+G4 = { gen_tps = 58.1, prefill_tps = 526, date = "2026-11-20", note = "实测：b12584，下载 183 GB 约 9 分钟，VRAM 71.5 GB，Engram 预读 334 秒" }
+
+[[preset]]
+id = "glm53-flash-huihui-abl-ud-iq2xxs"
+engine = "llamacpp"
+label = "GLM-5.3-Flash 321B 无审查 UD-IQ2_XXS（huihui）"
+repo = "huihui-ai/Huihui-GLM-5.3-Flash-abliterated-GGUF"
+file = "UD-IQ2_XXS/GLM-5.3-Flash-UD-IQ2_XXS-00001-of-00004.gguf"
+alias = "glm-5.3-flash-abliterated"
+release = "b12584"
+weights_gb = 101.8
+licence = "MIT"
+parallel = 2
+
+[preset.gpu.G4]
+ctx = 131072
+kv = "q8_0"
+# 101.8 GB of weights: the experts of 6 layers stay in host RAM so the rest fits in 96 GB (VRAM 91.3 GB measured).
+extra_args = ["-ngl", "99", "--n-cpu-moe", "6", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24"]
+
+[preset.measured]
+G4 = { gen_tps = 57.6, prefill_tps = 1094, date = "2026-11-20", note = "实测：b12584，下载 102 GB 约 5 分钟，冷启动到可用约 8 分钟" }

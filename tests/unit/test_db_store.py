@@ -3,6 +3,8 @@ import sqlite3
 
 import pytest
 
+from colabinet.db import SCHEMA_VERSION
+
 
 def _session(**over):
     base = dict(
@@ -95,7 +97,7 @@ async def test_schema_v2_views_and_migration_from_v1(tmp_path):
     assert (row["gen_tps"], row["prefill_tps"]) == (12.5, 5000.0)
     assert round(row["e2e_tps"], 2) == round(100 / 9.1, 2)
     assert (await db.fetchone("SELECT cu FROM run_cu"))["cu"] == 1.5
-    assert (await db.fetchone("PRAGMA user_version"))["user_version"] == 4
+    assert (await db.fetchone("PRAGMA user_version"))["user_version"] == SCHEMA_VERSION
     db.close()
 
 
@@ -122,7 +124,7 @@ async def test_v1_to_v2_migration_preserves_rows(tmp_path):
         assert (await database.fetchone("SELECT colab_name FROM sessions WHERE id = 5"))["colab_name"] == "preserved"
         assert (await database.fetchone("SELECT session_id FROM runs WHERE id = 7"))["session_id"] == 5
         assert (await database.fetchone("SELECT path FROM requests WHERE id = 9"))["path"] == "/v1/models"
-        assert (await database.fetchone("PRAGMA user_version"))["user_version"] == 4
+        assert (await database.fetchone("PRAGMA user_version"))["user_version"] == SCHEMA_VERSION
         assert (await database.fetchone("SELECT account_id FROM sessions WHERE id = 5"))["account_id"] == "default"
     finally:
         database.close()

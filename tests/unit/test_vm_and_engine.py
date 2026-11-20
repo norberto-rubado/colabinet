@@ -253,6 +253,7 @@ def test_split_download_fetches_missing_companions_when_first_shard_exists(tmp_p
     (repo_dir / first).write_bytes(b"first")
     monkeypatch.setattr(setup_llamacpp, "MODELS", str(tmp_path))
     monkeypatch.setattr(setup_llamacpp, "event", lambda *a, **kw: None)
+    monkeypatch.setattr(setup_llamacpp, "ensure_hf", lambda mode: False)  # hf CLI presence: test_llamacpp_links
 
     def download(cmd, **kw):
         args = shlex.split(cmd)
@@ -276,6 +277,7 @@ def test_split_download_stops_on_missing_companion(tmp_path, monkeypatch):
     (repo_dir / first).write_bytes(b"first")
     monkeypatch.setattr(setup_llamacpp, "MODELS", str(tmp_path))
     monkeypatch.setattr(setup_llamacpp, "event", lambda *a, **kw: None)
+    monkeypatch.setattr(setup_llamacpp, "ensure_hf", lambda mode: False)  # hf CLI presence: test_llamacpp_links
     monkeypatch.setattr(setup_llamacpp, "sh", lambda *a, **kw: (1, "missing shard"))
     with pytest.raises(RuntimeError, match="model-00002-of-00002.gguf"):
         setup_llamacpp.download("org/repo", first)
@@ -284,6 +286,7 @@ def test_split_download_stops_on_missing_companion(tmp_path, monkeypatch):
 def test_same_projector_filename_is_isolated_between_repositories(tmp_path, monkeypatch):
     monkeypatch.setattr(setup_llamacpp, "MODELS", str(tmp_path))
     monkeypatch.setattr(setup_llamacpp, "event", lambda *a, **kw: None)
+    monkeypatch.setattr(setup_llamacpp, "ensure_hf", lambda mode: False)  # hf CLI presence: test_llamacpp_links
     downloaded = []
 
     def download(cmd, **kw):

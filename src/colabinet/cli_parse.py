@@ -53,6 +53,23 @@ class Listing:
         return [r for r in self.runtimes if r.name is None]
 
 
+def rate_class(hardware: str, shape: str = "") -> str | None:
+    """The CU/h rate class (config.GPU_CLASSES) of a listed runtime, or None for hardware without a rate (H100, TPU).
+
+    Mirrors config.cli_flags: a High-RAM T4 is T4-HIGHMEM and a High-RAM A100 is the A100-80 class."""
+    hw = (hardware or "").strip().upper()
+    high = (shape or "").strip().lower().startswith("high")
+    if hw in ("CPU", "NONE"):
+        return "CPU"
+    if hw == "T4":
+        return "T4-HIGHMEM" if high else "T4"
+    if hw == "A100":
+        return "A100-80" if high else "A100"
+    if hw in ("L4", "G4"):
+        return hw
+    return None
+
+
 def parse_sessions(text: str) -> tuple[list[Runtime], bool]:
     """Returns (runtimes, said_empty)."""
     rows: list[Runtime] = []

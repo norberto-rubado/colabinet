@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import httpx
 
 from .config import VRAM_GB
-from .vm.gguf_files import gguf_files
+from .vm.gguf_files import gguf_files, repo_files
 
 KV_RATIO = {"f16": 1.0, "bf16": 1.0, "f32": 2.0, "f8_e4m3": 0.5, "q8_0": 34 / 64,
             "q5_1": 24 / 64, "q5_0": 22 / 64, "q4_1": 20 / 64, "q4_0": 18 / 64, "iq4_nl": 18 / 64,
@@ -75,10 +75,12 @@ def estimate(gpu_class: str, weights_gb: float | None, ctx: int, kv: str, bytes_
     return Fit("fits", total, kv_size, vram, f"{parts}：能放下")
 
 
-async def hf_file_gb(client: httpx.AsyncClient, repo: str, path: str, revision: str = "main") -> float | None:
-    """Complete model size from resolve headers, including every shard of a split GGUF."""
+async def hf_file_gb(client: httpx.AsyncClient, repo: str, path: str, revision: str = "main",
+                     links: dict[str, str] | None = None) -> float | None:
+    """Complete model size from resolve headers, including every shard of a split GGUF. With `links`, a shard name
+    that is only a symlink on the VM is sized by its real target file in the repo."""
     try:
-        paths = gguf_files(path)
+        paths = repo_files(path, links) if links else gguf_files(path)
     except ValueError:
         return None
     total = 0.0

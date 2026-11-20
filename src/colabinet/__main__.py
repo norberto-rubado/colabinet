@@ -31,6 +31,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--offline", action="store_true", help="doctor: skip the Google account API check")
     ap.add_argument("--stop-on-exit", action="store_true", help="stop all managed sessions when quitting")
     ap.add_argument("--no-notify", action="store_true", help="no macOS notifications for critical alerts")
+    ap.add_argument("--gateway-port", type=int, default=3079,
+                    help="authenticated OpenAI-compatible gateway on 127.0.0.1 (default 3079; 0 disables)")
+    ap.add_argument("--public-api-base", default="https://llm.111649.xyz/v1",
+                    help="public base URL of the gateway, shown on the settings page")
     ap.add_argument("--version", action="version", version=f"colabinet {__version__}")
     opts = ap.parse_args(argv)
     if opts.offline and opts.command != "doctor":
@@ -38,6 +42,8 @@ def main(argv: list[str] | None = None) -> int:
     settings = _settings(opts)
     settings.stop_on_exit = opts.stop_on_exit
     settings.notify = not opts.no_notify
+    settings.gateway_port = opts.gateway_port
+    settings.public_api_base = opts.public_api_base
     from .doctor import InstallationError, require_colab
 
     try:

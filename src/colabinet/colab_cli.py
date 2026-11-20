@@ -8,11 +8,13 @@ the name is saved would orphan a billing VM. Interactive login inherits the term
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import shlex
 import signal
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -23,7 +25,7 @@ from .config import cli_flags
 SECRET_KEY = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD)", re.I)
 PROXY_TOKEN = re.compile(r"(colab-runtime-proxy-token=)[^&\s]+")
 
-TIMEOUTS = {"sessions": 30.0, "usage": 30.0, "upload": 120.0, "exec": 90.0, "stop": 60.0}
+TIMEOUTS = {"sessions": 30.0, "usage": 30.0, "upload": 120.0, "exec": 90.0, "stop": 60.0, "heartbeat": 45.0}
 
 
 @dataclass
@@ -168,6 +170,20 @@ class ColabCLI:
             args += ["--env", f"{k}={v}"]
         r = await self._run(args, self.timeouts["exec"])
         return ExecResult(r.rc, r.out, r.timed_out, parse_status(r.out))
+
+    async def exec_code(self, name: str, code: str, timeout: float | None = None) -> CmdResult:
+        """`colab exec -s NAME -f <tmp.py>` for a short snippet (e.g. the external keep-alive heartbeat).
+
+        The code goes through a temporary file rather than stdin, so stdin stays /dev/null: an expired token makes the
+        CLI wait on input(), and that must fail rather than read the snippet."""
+        fd, path = tempfile.mkstemp(prefix="colabinet-exec-", suffix=".py")
+        try:
+            with os.fdopen(fd, "w") as file:
+                file.write(code)
+            return await self._run(["exec", "-s", name, "-f", path], timeout or self.timeouts["heartbeat"])
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
 
     async def stop(self, name: str) -> CmdResult:
         return await self._run(["stop", "-s", name], self.timeouts["stop"])

@@ -1,5 +1,5 @@
 {% from "macros.html" import icon, nav_attrs %}
-{% set alert_labels = {'account_reconnect': '需要重新连接账号', 'create_orphan': '可能有遗留 VM', 'create_slow': '创建缓慢', 'daily_cap': '每日上限', 'endpoint_missing': '端点缺失', 'engine_down': '推理引擎无响应', 'external_runtime': '外部运行时', 'foreign_vm': '陌生 VM', 'gpu_mismatch': 'GPU 不符', 'idle_warn': '即将闲置自动停止', 'low_balance': '余额不足', 'preflight': '启动前检查', 'proxy_port': '代理端口', 'setup_failed': '设置失败', 'ssh_429': 'SSH 连接受限', 'stop_unconfirmed': '停止未确认', 'tunnel_slow': '隧道连接缓慢', 'unknown_runtime': '未知运行时'} %}
+{% set alert_labels = {'account_reconnect': '需要重新连接账号', 'create_orphan': '可能有遗留 VM', 'create_slow': '创建缓慢', 'daily_cap': '每日上限', 'endpoint_missing': '端点缺失', 'engine_down': '推理引擎无响应', 'external_runtime': '外部运行时', 'external_keepalive': '外部运行时保活', 'foreign_vm': '陌生 VM', 'gpu_mismatch': 'GPU 不符', 'idle_warn': '即将闲置自动停止', 'low_balance': '余额不足', 'preflight': '启动前检查', 'proxy_port': '代理端口', 'setup_failed': '设置失败', 'ssh_429': 'SSH 连接受限', 'stop_unconfirmed': '停止未确认', 'tunnel_slow': '隧道连接缓慢', 'unknown_runtime': '未知运行时'} %}
 {% if overview_data.alerts %}
 <section class="cb-attention">
   <div class="cb-section-head"><h2 class="cb-section-title">需要处理</h2><span class="cb-count" data-tone="danger">{{ overview_data.alerts | length }}</span></div>
@@ -19,7 +19,7 @@
           {% elif act == 'extend-daily-cap' %}
           <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="outline" hx-post="/ui/actions/daily-cap/extend" hx-swap="none">今日 +5 CU</button>
           {% elif act == 'stop-external' and alert.target %}
-          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="destructive" hx-post="/ui/actions/external/{{ alert.target }}/stop" hx-vals='{{ {"confirm": "yes", "account_id": overview_data.account_id} | tojson | forceescape }}' hx-confirm="要停止非托管运行时 {{ alert.target }} 吗？它不受 colabinet 管理。" hx-swap="none">停止 {{ alert.target }}</button>
+          <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="destructive" hx-post="/ui/actions/external/{{ alert.target }}/stop" hx-vals='{{ {"confirm": "yes", "account_id": overview_data.account_id} | tojson | forceescape }}' hx-confirm="要停止外部运行时 {{ alert.target }} 吗？它不由 colabinet 创建，VM 上的数据会全部丢失。" hx-swap="none">停止 {{ alert.target }}</button>
           {% endif %}
         {% endfor %}
         {% if alert.session_id %}<a class="btn" data-size="sm" data-variant="ghost" href="/sessions/{{ alert.session_id }}" {{ nav_attrs() }}>打开</a>{% endif %}

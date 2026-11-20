@@ -106,6 +106,8 @@ class Settings:
     stop_retry_s: float = 30
     notify: bool = True
     stop_on_exit: bool = False
+    gateway_port: int = 3079  # authenticated OpenAI-compatible gateway on 127.0.0.1; 0 disables it
+    public_api_base: str = "https://llm.111649.xyz/v1"  # how remote clients reach the gateway (shown in settings)
 
     def __post_init__(self) -> None:
         self.data_dir = Path(self.data_dir).expanduser().resolve()
@@ -124,6 +126,10 @@ class Settings:
     @property
     def token_path(self) -> Path:
         return self.data_dir / "api.token"
+
+    @property
+    def gateway_key_path(self) -> Path:
+        return self.data_dir / "gateway.key"
 
     @property
     def log_dir(self) -> Path:

@@ -1,6 +1,7 @@
 # Runs ON the Colab VM, started detached by bg.py.
 # Idempotent: skips the install and downloads that are already present, stops all three engines first (so a
 # reconfigure can switch engines), then starts llama-server and waits for /health. Progress goes to $EVENTS.
+# `setup_llamacpp.py --prewarm FILE...` is the detached page-cache reader started once the server is healthy.
 import fcntl
 import json
 import os
@@ -17,7 +18,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import quote
 
-from gguf_files import gguf_files
+from gguf_files import gguf_files, repo_files
 
 E = os.environ.get
 ROOT = E("COLABINET_ROOT", "/content/colabinet")
@@ -26,6 +27,12 @@ ENGINE_LOG = E("ENGINE_LOG", os.path.join(ROOT, "engine.log"))
 MODELS = E("MODELS_DIR", "/content/models")
 LLAMA_DIR = E("LLAMA_DIR", "/content/llama")
 T0 = time.time()
+HF_MODES = ("xet-fast", "xet", "no-xet")
+HF_PACKAGE = "huggingface_hub[hf_xet]"
+PREWARM_WORKERS = 16
+PREWARM_CHUNK = 64 << 20  # range handed to one reader
+PREWARM_READ = 16 << 20  # bytes per pread call: bounds the transient buffers to workers x 16 MiB
+PREWARM_PATTERN = "[s]etup_llamacpp.py --prewarm"  # bracket: the stop command must not match its own argv
 
 
 def event(kind, **kw):
@@ -138,26 +145,101 @@ def dir_bytes(path):
     total = 0
     for root, _, files in os.walk(path):
         for f in files:
+            full = os.path.join(root, f)
+            if os.path.islink(full):  # a link would count its target twice
+                continue
             try:
-                total += os.path.getsize(os.path.join(root, f))
+                total += os.path.getsize(full)
             except OSError:
                 pass
     return total
 
 
-def download(repo, name):
+def hf_env(mode, base=None):
+    """Env for `hf download`. xet-fast: Xet with HF_XET_HIGH_PERFORMANCE (measured on a G4: 79 GB in ~4 min,
+    ~330 MB/s); xet: Xet with its default concurrency; no-xet: plain HTTP (the old behaviour, ~100 MB/s)."""
+    if mode not in HF_MODES:
+        raise ValueError(f"invalid LLM_HF_MODE {mode!r} (expected one of {', '.join(HF_MODES)})")
+    env = {**(os.environ if base is None else base), "HF_HUB_DISABLE_PROGRESS_BARS": "1"}
+    env.pop("HF_HUB_DISABLE_XET", None)
+    env.pop("HF_XET_HIGH_PERFORMANCE", None)
+    if mode == "no-xet":
+        env["HF_HUB_DISABLE_XET"] = "1"
+    elif mode == "xet-fast":
+        env["HF_XET_HIGH_PERFORMANCE"] = "1"
+    return env
+
+
+def ensure_hf(mode):
+    """Make sure the `hf` CLI (and hf_xet unless no-xet) exist; pip-installs huggingface_hub[hf_xet] if not.
+    Returns True when it installed. A failed install only fails the run when `hf` itself is missing: without
+    hf_xet the Hub client falls back to plain HTTP."""
+    py = shlex.quote(sys.executable)
+    has_hf = shutil.which("hf") is not None
+    has_xet = mode == "no-xet" or sh(f"{py} -c 'import hf_xet'", timeout=120)[0] == 0
+    if has_hf and has_xet:
+        return False
+    event("hf_install", package=HF_PACKAGE, reason="hf CLI missing" if not has_hf else "hf_xet missing")
+    t = time.time()
+    rc, out = sh(f"{py} -m pip install -q -U {shlex.quote(HF_PACKAGE)}", timeout=900)
+    ok = rc == 0 and shutil.which("hf") is not None
+    event("hf_install_done", package=HF_PACKAGE, ok=ok, seconds=round(time.time() - t, 1),
+          **({} if ok else {"output": out[-300:]}))
+    if not ok and shutil.which("hf") is None:
+        raise RuntimeError(f"could not install {HF_PACKAGE}: {out[-500:]}")
+    return True
+
+
+def make_links(models, links):
+    """Create `name -> target` symlinks inside the model dir (relative, so the dir can move). Idempotent: a
+    correct link is kept; a wrong link or a regular file at `name` is replaced atomically. Returns links made."""
+    made = 0
+    for name, target in (links or {}).items():
+        link = os.path.join(models, name)
+        real = os.path.join(models, target)
+        if not os.path.isfile(real):
+            raise RuntimeError(f"link target {target} for {name} is missing")
+        rel = os.path.relpath(real, os.path.dirname(link))
+        if os.path.islink(link) and os.readlink(link) == rel:
+            continue
+        if os.path.isdir(link) and not os.path.islink(link):
+            raise RuntimeError(f"cannot link {name}: a directory is in the way")
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        tmp = f"{link}.colabinet-link"
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        os.symlink(rel, tmp)
+        os.replace(tmp, link)
+        made += 1
+    return made
+
+
+def download(repo, name, links=None, mode="xet-fast", workers=8):
+    """Fetch `name` (every shard of a split GGUF) from `repo`. `links` maps file names llama.cpp expects to real
+    files in the same repo: link names are not fetched, their targets are, and the links are created after."""
+    links = dict(links or {})
     models = model_directory(repo, MODELS)
-    shards = gguf_files(name)
-    missing = [shard for shard in shards if not os.path.exists(os.path.join(models, shard))]
+    expected = gguf_files(name)
+    fetch = repo_files(name, links)
+    missing = [path for path in fetch if not os.path.isfile(os.path.join(models, path))]
 
     def total_bytes():
-        return sum(os.path.getsize(os.path.join(models, shard)) for shard in shards)
+        return sum(os.path.getsize(os.path.join(models, path)) for path in fetch)
+
+    def finish_links():
+        made = make_links(models, links)
+        absent = [path for path in expected if not os.path.exists(os.path.join(models, path))]
+        if absent:
+            raise RuntimeError(f"download of {name} is incomplete (missing {absent})")
+        return {"links": len(links), "links_made": made} if links else {}
 
     if not missing:
-        event("download_done", file=name, gb=round(total_bytes() / 1e9, 2), seconds=0, skipped=True)
+        event("download_done", file=name, gb=round(total_bytes() / 1e9, 2), seconds=0, skipped=True,
+              **finish_links())
         return
     os.makedirs(models, exist_ok=True)
-    env = {**os.environ, "HF_HUB_DISABLE_XET": "1", "HF_HUB_DISABLE_PROGRESS_BARS": "1"}
+    env = hf_env(mode)
+    ensure_hf(mode)
     start_bytes, t = dir_bytes(models), time.time()
     done = threading.Event()
 
@@ -168,16 +250,114 @@ def download(repo, name):
 
     threading.Thread(target=progress, daemon=True).start()
     # One Hub request lets hf fetch independent shards concurrently and resume partial downloads.
-    files = " ".join(shlex.quote(shard) for shard in missing)
-    rc, out = sh(f"hf download {shlex.quote(repo)} {files} --local-dir {shlex.quote(models)} --max-workers 4", env=env)
+    files = " ".join(shlex.quote(path) for path in missing)
+    rc, out = sh(f"hf download {shlex.quote(repo)} {files} --local-dir {shlex.quote(models)} "
+                 f"--max-workers {int(workers)}", env=env)
     done.set()
-    remaining = [shard for shard in shards if not os.path.exists(os.path.join(models, shard))]
+    remaining = [path for path in fetch if not os.path.isfile(os.path.join(models, path))]
     if rc != 0 or remaining:
         raise RuntimeError(f"download of {name} failed (missing {remaining}): {out[-500:]}")
-    size, dt = total_bytes(), time.time() - t
-    transferred = sum(os.path.getsize(os.path.join(models, shard)) for shard in missing)
+    linked = finish_links()
+    size, dt = total_bytes(), max(time.time() - t, 1e-6)
+    transferred = sum(os.path.getsize(os.path.join(models, path)) for path in missing)
     event("download_done", file=name, gb=round(size / 1e9, 2), seconds=round(dt, 1),
-          mb_s=round(transferred / dt / 1e6, 1))
+          mb_s=round(transferred / dt / 1e6, 1), hf_mode=mode, **linked)
+
+
+def prewarm_paths(repo, names, models=MODELS):
+    """Absolute paths for the prewarm list (link names allowed), deduplicated by the file they resolve to."""
+    directory = model_directory(repo, models)
+    paths = {}
+    for name in names:
+        path = os.path.join(directory, name)
+        paths.setdefault(os.path.realpath(path), path)
+    return list(paths.values())
+
+
+def start_prewarm(repo, names, models=MODELS):
+    """Launch the page-cache reader in its own session so it outlives this script and never delays the run."""
+    paths = prewarm_paths(repo, names, models)
+    if not paths:
+        return None
+    script = os.path.abspath(__file__)
+    with open(os.environ.get("OUT") or os.devnull, "a") as out:
+        return subprocess.Popen([sys.executable, "-u", script, "--prewarm", *paths], stdin=subprocess.DEVNULL,
+                                stdout=out, stderr=subprocess.STDOUT, cwd=os.path.dirname(script),
+                                start_new_session=True)
+
+
+def stop_prewarm():
+    """A previous run's reader would compete with this run's download for disk bandwidth."""
+    subprocess.run(["pkill", "-f", PREWARM_PATTERN], capture_output=True, text=True)
+
+
+def prewarm(paths, workers=PREWARM_WORKERS, chunk=PREWARM_CHUNK, interval=10.0):
+    """Read whole files into the page cache with `workers` parallel os.pread range readers (no vmtouch).
+    Emits `prewarm` progress about every `interval` s and one `prewarm_done`; missing files are skipped."""
+    files, missing, seen = [], [], set()
+    for path in paths:
+        real = os.path.realpath(path)
+        if real in seen:
+            continue
+        seen.add(real)
+        try:
+            files.append((real, os.path.getsize(real)))
+        except OSError:
+            missing.append(path)
+    total = sum(size for _, size in files)
+    extra = {"missing": missing} if missing else {}
+    event("prewarm", progress=0.0, gb=0.0, mb_s=0.0, total_gb=round(total / 1e9, 2), files=len(files), **extra)
+    t = time.time()
+    fds = [os.open(path, os.O_RDONLY) for path, _ in files]
+    ranges = [(fd, offset, min(chunk, size - offset))
+              for fd, (_, size) in zip(fds, files) for offset in range(0, size, chunk)]
+    queue = iter(ranges)
+    lock = threading.Lock()
+    state = {"bytes": 0, "error": None}
+
+    def reader():
+        while True:
+            with lock:
+                item = next(queue, None) if state["error"] is None else None
+            if item is None:
+                return
+            fd, offset, length = item
+            got = 0
+            try:
+                while got < length:
+                    data = os.pread(fd, min(length - got, PREWARM_READ), offset + got)
+                    if not data:
+                        break
+                    got += len(data)
+                    del data
+            except OSError as e:
+                with lock:
+                    state["error"] = str(e)
+            with lock:
+                state["bytes"] += got
+
+    threads = [threading.Thread(target=reader, daemon=True) for _ in range(max(1, min(workers, len(ranges))))]
+    try:
+        for thread in threads:
+            thread.start()
+        while True:
+            deadline = time.time() + interval
+            for thread in threads:
+                thread.join(max(0.0, deadline - time.time()))
+            if not any(thread.is_alive() for thread in threads):
+                break
+            got, dt = state["bytes"], max(time.time() - t, 1e-6)
+            event("prewarm", progress=round(100 * got / total, 1) if total else 100.0, gb=round(got / 1e9, 2),
+                  mb_s=round(got / dt / 1e6, 1))
+    finally:
+        for thread in threads:
+            thread.join()
+        for fd in fds:
+            os.close(fd)
+    got, dt = state["bytes"], max(time.time() - t, 1e-6)
+    event("prewarm_done", gb=round(got / 1e9, 2), seconds=round(dt, 1), mb_s=round(got / dt / 1e6, 1),
+          files=len(files), **extra, **({"error": state["error"]} if state["error"] else {}))
+    return got
 
 
 def log_tail(n=2000):
@@ -220,9 +400,15 @@ def main():
     event("gpu_info", nvidia_smi=out.strip(), torch=torch.strip())
     if not stop_engines(port):
         raise RuntimeError(f"port {port} is still busy after stopping the engines")
+    stop_prewarm()
     server, libs = install(env["LLM_RELEASE"])
-    for name in [env["LLM_FILE"]] + ([env["LLM_MMPROJ_FILE"]] if env.get("LLM_MMPROJ_FILE") else []):
-        download(env["LLM_REPO"], name)
+    mode = env.get("LLM_HF_MODE") or "xet-fast"
+    hf_env(mode)  # reject an unknown mode before any download starts
+    workers = int(env.get("LLM_HF_MAX_WORKERS") or 8)
+    links = json.loads(env.get("LLM_LINKS") or "{}")
+    download(env["LLM_REPO"], env["LLM_FILE"], links=links, mode=mode, workers=workers)
+    if env.get("LLM_MMPROJ_FILE"):
+        download(env["LLM_REPO"], env["LLM_MMPROJ_FILE"], mode=mode, workers=workers)
     run_env = {**env, "LD_LIBRARY_PATH": ":".join([os.path.dirname(server), *libs, "/usr/lib64-nvidia",
                                                    env.get("LD_LIBRARY_PATH", "")])}
     cmd = build_command(env, server)
@@ -251,9 +437,24 @@ def main():
     used = sh("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits")[1].strip()
     event("server_ready", seconds=round(time.time() - t, 1), vram_used_mib=int(used) if used.isdigit() else None,
           modalities=props.get("modalities"), cmd=" ".join(cmd[1:]))
+    names = json.loads(env.get("LLM_PREWARM") or "[]")
+    if names:
+        try:  # the server is already serving: a prewarm problem is reported, never a setup error
+            start_prewarm(env["LLM_REPO"], names)
+        except Exception as e:
+            event("prewarm_done", gb=0.0, seconds=0, mb_s=0.0, files=0, error=str(e)[:500])
 
 
-if __name__ == "__main__":
+def prewarm_main(paths):
+    try:
+        prewarm(paths, workers=int(E("LLM_PREWARM_WORKERS") or PREWARM_WORKERS))
+    except Exception as e:
+        event("prewarm_done", gb=0.0, seconds=0, mb_s=0.0, files=0, error=str(e)[:500])
+
+
+if __name__ == "__main__" and sys.argv[1:2] == ["--prewarm"]:
+    prewarm_main(sys.argv[2:])
+elif __name__ == "__main__":
     try:
         main()
     except Exception as e:  # report every failure as an event the supervisor can show

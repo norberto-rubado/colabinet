@@ -173,6 +173,34 @@ class Store:
         )
 
 
+    # --- external runtimes ----------------------------------------------------------------------------------
+    async def see_externals(self, seen: list[tuple[str, str | None, str]], now: float) -> None:
+        """Record (endpoint, name, hardware) rows from one trusted listing. first_seen is only set on insert."""
+        if not seen:
+            return
+        await self.db.write(lambda connection: connection.executemany(
+            "INSERT INTO external_runtimes (endpoint, name, hardware, first_seen, last_seen) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(endpoint) DO UPDATE SET name = excluded.name, hardware = excluded.hardware, "
+            "last_seen = excluded.last_seen",
+            [(endpoint, name, hardware, now, now) for endpoint, name, hardware in seen],
+        ))
+
+    async def externals(self) -> list[dict[str, Any]]:
+        return await self.db.fetchall("SELECT * FROM external_runtimes ORDER BY first_seen, endpoint")
+
+    async def external(self, endpoint: str) -> dict[str, Any] | None:
+        return await self.db.fetchone("SELECT * FROM external_runtimes WHERE endpoint = ?", (endpoint,))
+
+    async def set_external_keepalive(self, endpoint: str, enabled: bool, since: float | None,
+                                     stop_after_min: int | None) -> None:
+        await self.db.execute(
+            "UPDATE external_runtimes SET keepalive = ?, keepalive_since = ?, stop_after_min = ? WHERE endpoint = ?",
+            (1 if enabled else 0, since if enabled else None, stop_after_min if enabled else None, endpoint))
+
+    async def prune_externals(self, before: float) -> None:
+        """Forget runtimes not listed since `before` (endpoints are never reused, so the row is dead)."""
+        await self.db.execute("DELETE FROM external_runtimes WHERE last_seen < ?", (before,))
+
     async def save_query(self, name: str, spec_json: str, ts: float) -> int:
         return await self.db.write(lambda connection: connection.execute(
             "INSERT INTO saved_queries (name, spec_json, created_at) VALUES (?, ?, ?) "

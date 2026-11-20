@@ -19,6 +19,7 @@ from .config import Clock, Settings
 from .db import Database
 from .doctor import require_colab
 from .engines import Engine
+from .gateway import Gateway, load_or_create_key
 from .net import start_server, stop_server
 from .presets import PresetError, load_presets
 from .proxy import ProxyManager
@@ -112,6 +113,17 @@ async def serve(settings: Settings, *, tunnels: Tunnels | None = None, engines: 
             except (NotImplementedError, RuntimeError):
                 pass
         log.info("colabinet console on http://127.0.0.1:%s (API token in %s)", settings.ui_port, settings.token_path)
+        gateway = gw_server = gw_task = None
+        if settings.gateway_port:
+            try:
+                gateway = Gateway(sup, load_or_create_key(settings.gateway_key_path))
+                gw_server, gw_task = await start_server(gateway, settings.gateway_port)
+                log.info("colabinet gateway on http://127.0.0.1:%s (key in %s)", settings.gateway_port,
+                         settings.gateway_key_path)
+            except OSError as e:
+                log.error("gateway: could not listen on 127.0.0.1:%s: %s", settings.gateway_port, e)
+                sup.alerts.raise_("gateway_port", f"对外 API：无法监听端口 {settings.gateway_port}：{e}",
+                                  key="gateway_port")
         if ready:
             ready.set()
         await stop_event.wait()
@@ -119,6 +131,10 @@ async def serve(settings: Settings, *, tunnels: Tunnels | None = None, engines: 
         if remaining:
             log.warning("sessions still running (they bill until stopped; stop them in the Colab web UI): "
                         "%s", ", ".join(remaining))
+        if gw_server is not None and gw_task is not None:
+            await stop_server(gw_server, gw_task)
+        if gateway is not None:
+            await gateway.aclose()
         await stop_server(server, task)
         db.close()
         return remaining

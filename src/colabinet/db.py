@@ -16,7 +16,7 @@ from typing import Any, Callable, TypeVar
 
 T = TypeVar("T")
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -121,7 +121,22 @@ UPDATE runs SET status = 'failed' WHERE status = 'pending'
     AND session_id IN (SELECT id FROM sessions WHERE state = 'failed');
 """
 
-MIGRATIONS = {1: SCHEMA_V1, 2: SCHEMA_V2, 3: SCHEMA_V3, 4: SCHEMA_V4}
+# Runtimes in the `colab sessions` listing that colabinet did not create ("external"): first_seen survives restarts
+# so the cost estimate keeps counting; keepalive/keepalive_since/stop_after_min drive the 接管保活 heartbeat.
+SCHEMA_V5 = """
+CREATE TABLE IF NOT EXISTS external_runtimes (
+    endpoint TEXT PRIMARY KEY,
+    name TEXT,
+    hardware TEXT,
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    keepalive INTEGER NOT NULL DEFAULT 0,
+    keepalive_since REAL,
+    stop_after_min INTEGER
+);
+"""
+
+MIGRATIONS = {1: SCHEMA_V1, 2: SCHEMA_V2, 3: SCHEMA_V3, 4: SCHEMA_V4, 5: SCHEMA_V5}
 
 
 

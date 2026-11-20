@@ -1,0 +1,52 @@
+{% from "macros.html" import icon, empty %}
+{% if ext.rows %}
+<div class="table-container">
+<table class="table cb-externals">
+  <caption class="cb-visually-hidden">外部运行时：正在计费但不由 colabinet 创建的 Colab 运行时</caption>
+  <thead><tr><th>名称</th><th>硬件</th><th class="cb-num">已运行</th><th class="cb-num">估算费率</th><th class="cb-num">估算已花费</th><th class="cb-sticky-actions">操作</th></tr></thead>
+  <tbody>
+  {% for rt in ext.rows %}
+    <tr data-cb-key="ext-{{ rt.endpoint }}">
+      <td>{% if rt.name %}<strong>{{ rt.name }}</strong>{% else %}<span class="cb-muted">（未命名）</span>{% endif %}<span class="cb-sub" title="{{ rt.endpoint }}"><br>{{ rt.endpoint[:40] }}</span></td>
+      <td>{{ rt.hardware }}{% if rt.shape and rt.shape != 'Standard' %} <span class="cb-sub">{{ rt.shape }}</span>{% endif %}</td>
+      <td class="cb-num" title="自 colabinet 首次发现（{{ rt.first_seen | day }}）起；实际可能更早启动">{{ rt.up_s | dur }}</td>
+      <td class="cb-num">{% if rt.rate_cu_h is not none %}{{ rt.rate_cu_h | num(2) }} CU/h{% else %}<span class="cb-muted" title="费率表中没有 {{ rt.hardware }}">未知</span>{% endif %}</td>
+      <td class="cb-num" title="费率 × 自首次发现起的时长，是下限估算">{% if rt.cu_spent is not none %}≈ {{ rt.cu_spent | num(2) }} CU{% else %}<span class="cb-muted">-</span>{% endif %}</td>
+      <td class="cb-sticky-actions cb-right">
+        <div class="cb-row" style="justify-content: flex-end">
+        {% if rt.name %}
+          {% if rt.keepalive %}
+          <span class="badge" data-tone="success" title="每 60 秒执行一次 colab exec 心跳{% if rt.last_beat %}；上次 {{ rt.last_beat | when }}{% if rt.last_beat_ok == false %}（失败：{{ rt.beat_error }}）{% endif %}{% endif %}">保活中{% if rt.stop_at %} · {{ (rt.stop_at - ext.now) | dur }}后自动停止{% endif %}</span>
+          {% if rt.last_beat_ok == false %}<span class="badge" data-tone="warning" title="{{ rt.beat_error }}">心跳失败</span>{% endif %}
+          <button class="btn" data-cb-key="keepalive-off" data-size="sm" data-variant="outline" hx-post="/ui/actions/external-keepalive"
+                  hx-vals='{{ {"endpoint": rt.endpoint, "enabled": "0", "account_id": ext.account_id} | tojson | forceescape }}'
+                  hx-target="#ext-runtimes" hx-swap="cb-patch">取消接管保活</button>
+          {% else %}
+          <form class="cb-row" hx-post="/ui/actions/external-keepalive" hx-target="#ext-runtimes" hx-swap="cb-patch"
+                hx-confirm="接管保活后 colabinet 会每 60 秒对 {{ rt.name }} 执行一次心跳，使其不被 Colab 闲置回收，它会持续计费，直到自动停止或手动停止。继续吗？">
+            <input type="hidden" name="endpoint" value="{{ rt.endpoint }}">
+            <input type="hidden" name="enabled" value="1">
+            <input type="hidden" name="account_id" value="{{ ext.account_id or '' }}">
+            <label class="cb-muted" title="从开启保活起计时，到时自动停止；0 表示不自动停止">自动停止
+              <input class="input" data-size="sm" type="number" name="stop_after_min" min="0" step="1" value="{{ ext.idle_default }}" style="width: 5.5em" aria-label="{{ rt.name }} 自动停止（分钟，0 为不自动停止）"> 分钟</label>
+            <button class="btn" data-cb-key="keepalive-on" data-size="sm" data-variant="outline" type="submit">接管保活</button>
+          </form>
+          {% endif %}
+          <button class="btn" data-cb-key="stop" data-size="sm" data-variant="destructive" hx-post="/ui/actions/external/{{ rt.name | urlencode }}/stop"
+                  hx-vals='{{ {"confirm": "yes", "account_id": ext.account_id, "endpoint": rt.endpoint, "card": "1"} | tojson | forceescape }}'
+                  hx-confirm="要停止外部运行时 {{ rt.name }}（{{ rt.hardware }}）吗？它不由 colabinet 创建，VM 上的数据（/content）会全部丢失。"
+                  hx-target="#ext-runtimes" hx-swap="cb-patch">{{ icon('stop') }}停止</button>
+        {% else %}
+          <span class="cb-muted" title="没有本地名称的运行时无法通过 CLI 按名称操作">请在 Colab 网页中停止</span>
+        {% endif %}
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="cb-muted">合计估算费率 {{ ext.rate_total | num(2) }} CU/h。已运行和已花费从 colabinet 首次发现该运行时算起（下限估算）；Colab 会在最后一次内核执行约 21-35 分钟后回收闲置运行时。</p>
+{% else %}
+{{ empty("没有外部运行时", "直接用 colab new 启动、不由 colabinet 管理的运行时会显示在这里。", "external") }}
+{% endif %}

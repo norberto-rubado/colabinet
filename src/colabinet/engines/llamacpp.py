@@ -3,10 +3,25 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from pathlib import Path
 
 from ..config import PACKAGE_DIR
 from .base import VM_DIR, VM_ROOT, RunSpec
+
+HF_MODES = ("xet-fast", "xet", "no-xet")
+log = logging.getLogger(__name__)
+
+
+def hf_mode() -> str:
+    """Hugging Face download mode passed to the VM as LLM_HF_MODE. The host picks it with COLABINET_LLM_HF_MODE
+    (default xet-fast); an unknown value falls back to the default instead of failing the setup."""
+    mode = os.environ.get("COLABINET_LLM_HF_MODE", "").strip() or "xet-fast"
+    if mode not in HF_MODES:
+        log.warning("COLABINET_LLM_HF_MODE=%r is not one of %s; using xet-fast", mode, ", ".join(HF_MODES))
+        return "xet-fast"
+    return mode
 
 
 class LlamaCppEngine:
@@ -37,6 +52,9 @@ class LlamaCppEngine:
             "LLM_MMPROJ_FILE": spec.mmproj or "",
             "LLM_MMPROJ_GPU": "1" if spec.mmproj_gpu else "0",
             "LLM_EXTRA_ARGS": json.dumps(list(spec.extra_args)),
+            "LLM_LINKS": json.dumps(dict(spec.links)),
+            "LLM_PREWARM": json.dumps(list(spec.prewarm)),
+            "LLM_HF_MODE": hf_mode(),
         }
         if spec.template:
             env["LLM_TEMPLATE"] = f"{VM_ROOT}/templates/{spec.template}"

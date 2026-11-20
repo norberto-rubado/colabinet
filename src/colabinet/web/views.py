@@ -126,6 +126,15 @@ async def overview(sup: Supervisor) -> dict[str, Any]:
     }
 
 
+async def external_runtimes(sup: Supervisor) -> dict[str, Any]:
+    """The 外部运行时 card: runtimes in `colab sessions` that colabinet did not create, with cost estimates."""
+    rows = await sup.externals()
+    return {"rows": rows, "account_id": sup.account_id,
+            "idle_default": (await sup.settings_values())["idle_min_default"], "now": sup.now(),
+            "rate_total": round(sum(row["rate_cu_h"] or 0 for row in rows), 2),
+            "listed_at": sup._externals_at}
+
+
 async def activity(sup: Supervisor, limit: int = 15, session_id: int | None = None) -> list[dict[str, Any]]:
     where, params = ("e.session_id = ?", (session_id,)) if session_id else ("1=1", ())
     rows = await sup.store.db.fetchall(

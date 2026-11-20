@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import icon, nav_attrs %}
+{% from "macros.html" import icon, nav_attrs, card_title %}
 {% block title %}会话{% endblock %}
 {% block crumbs %}<h1>会话</h1>{% endblock %}
 {% block actions %}<a class="btn" data-size="sm" href="/new" {{ nav_attrs() }}>{{ icon('plus') }}新建会话</a>{% endblock %}
@@ -23,5 +23,9 @@
   <section id="sessions-table" hx-get="/ui/sessions/table?tab={{ tab }}" hx-include=".cb-search" hx-trigger="load, every 3s" hx-swap="cb-patch">
     <p class="cb-muted">加载中…</p>
   </section>
+</section>
+<section class="card">
+  <header>{{ card_title('外部运行时', 'external') }}<p>不由 colabinet 创建、但正在计费的 Colab 运行时（例如直接用 <code>colab new</code> 启动的）。</p></header>
+  <section id="ext-runtimes" hx-get="/ui/external" hx-trigger="every 12s" hx-swap="cb-patch">{% include "partials/external_runtimes.html" %}</section>
 </section>
 {% endblock %}

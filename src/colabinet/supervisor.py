@@ -22,7 +22,7 @@ from . import billing
 from .accounts import Accounts
 from .activity import Activity
 from .alerts import Alerts
-from .cli_parse import Listing, Usage
+from .cli_parse import Listing, Runtime, Usage, rate_class
 from .colab_cli import ColabCLI
 from .config import GPU_CLASSES, Settings, detected_class
 from .diagnostics import bounded_diagnostic
@@ -44,6 +44,13 @@ DRIVEN = {"creating", "gpu_check", "gpu_mismatch", "setting_up", "reconfiguring"
 OPEN_ROWS = "state NOT IN ('stopped', 'failed') OR stop_unconfirmed = 1 OR name_reserved = 1"
 OBSERVE_INTERVAL_S = 15.0
 OBSERVE_LEASE_S = 30.0
+# External runtimes (in `colab sessions`, not created by colabinet). Colab reclaims an idle runtime ~21-35 min after
+# the last kernel execution, so 接管保活 runs a tiny `colab exec` every EXTERNAL_BEAT_S seconds.
+EXTERNAL_BEAT_S = 60.0
+EXTERNAL_TICK_S = 15.0
+EXTERNAL_BEAT_CODE = "print(1)\n"
+EXTERNAL_BEAT_ALERT_AFTER = 3  # consecutive failed heartbeats before a warning
+EXTERNAL_FORGET_S = 7 * 86400  # rows of runtimes not listed for this long are deleted
 
 
 def stop_if_cancelled() -> None:
@@ -58,6 +65,11 @@ def stop_if_cancelled() -> None:
 
 class CreateRefused(Exception):
     pass
+
+
+def external_cu(rate_cu_h: float, first_seen: float, now: float) -> float:
+    """Estimated CU an external runtime has used since colabinet first listed it (a lower bound: it may be older)."""
+    return rate_cu_h * max(0.0, now - first_seen) / 3600.0
 
 
 @dataclass
@@ -133,6 +145,9 @@ class Supervisor:
         self._recovery_lock = asyncio.Lock()
         self._loops: list[asyncio.Task] = []
         self._paused_for_account: set[int] = set()
+        self._externals: dict[str, Runtime] = {}  # endpoint -> runtime, from the latest trusted reconcile
+        self._externals_at: float | None = None
+        self._external_beats: dict[str, dict[str, Any]] = {}  # endpoint -> {at, ok, error, failures}
 
     # ------------------------------------------------------------------------------------------------- helpers
     def now(self) -> float:
@@ -167,8 +182,11 @@ class Supervisor:
             self.usage, self.usage_at = usage, self.now() if usage else None
             self.alerts.clear("low_balance")
             for alert in self.alerts.list():
-                if alert.key.startswith("external:") or alert.key in ("assignments_hidden", "account_reconnect"):
+                if alert.key.startswith(("external:", "external_keepalive:")) or alert.key in (
+                        "assignments_hidden", "account_reconnect"):
                     self.alerts.clear(alert.key)
+            self._externals, self._externals_at = {}, None
+            self._external_beats.clear()
 
     async def resume_account_sessions(self) -> None:
         async with self._recovery_lock:
@@ -958,7 +976,10 @@ class Supervisor:
         self.alerts.clear("daily_cap")
         return await self.cap_today()
 
-    async def stop_external(self, name: str, expected_account: str | None = None) -> None:
+    async def stop_external(self, name: str, expected_account: str | None = None, *, endpoint: str | None = None,
+                            reason: str = "user") -> None:
+        """Stop a runtime colabinet does not manage, by name. With `endpoint`, only if NAME still is that VM (a
+        runtime stopped and re-created under the same name must not be stopped by a stale card or timer)."""
         async with self._create_lock:
             if expected_account is not None and expected_account != self.account_id:
                 raise CreateRefused("当前账号已变更。请刷新概览后再停止此运行时。")
@@ -967,10 +988,110 @@ class Supervisor:
             if await self.store.name_in_use(name):
                 raise CreateRefused(f"{name!r} 是托管会话：请通过会话 id 停止它")
             listing = await self.fresh_listing()
-            if not (listing.trusted and listing.named(name)):
+            rt = listing.named(name) if listing.trusted else None
+            if not rt:
                 raise CreateRefused(f"列表中没有名为 {name!r} 的运行时")
+            if endpoint and rt.endpoint != endpoint:
+                raise CreateRefused(f"名为 {name!r} 的运行时已不是这台 VM（它可能已被停止并重新创建）；请刷新后重试")
             await self.cli.stop(name)
-            await self._event(None, "external_stopped", name=name, account_id=self.account_id)
+            row = await self.store.external(rt.endpoint)
+            if row and row["keepalive"]:
+                await self.store.set_external_keepalive(rt.endpoint, False, None, None)
+            self._externals.pop(rt.endpoint, None)
+            self._external_beats.pop(rt.endpoint, None)
+            self.alerts.clear(f"external_keepalive:{rt.endpoint}")
+            await self._event(None, "external_stopped", name=name, account_id=self.account_id,
+                              endpoint=rt.endpoint, hardware=rt.hardware, reason=reason)
+
+    async def external_keepalive(self, endpoint: str, enabled: bool, stop_after_min: int | None = None,
+                                 expected_account: str | None = None) -> dict[str, Any]:
+        """接管保活: heartbeat an external runtime so Colab does not reclaim it, and optionally stop it
+        `stop_after_min` minutes from now (None = the idle_min_default setting, 0 = never)."""
+        if expected_account is not None and expected_account != self.account_id:
+            raise CreateRefused("当前账号已变更。请刷新页面后再操作此运行时。")
+        rt = self._externals.get(endpoint)
+        if rt is None:
+            raise CreateRefused("此运行时已不在外部运行时列表中；请刷新后重试")
+        if enabled and not rt.name:
+            raise CreateRefused("未命名的运行时无法通过 `colab exec` 保活；请在 Colab 网页中处理它")
+        minutes = int((await self.settings_values())["idle_min_default"] if stop_after_min is None else stop_after_min)
+        if minutes < 0:
+            raise CreateRefused("自动停止时间不能为负数")
+        now = self.now()
+        await self.store.set_external_keepalive(endpoint, enabled, now, minutes)
+        self._external_beats.pop(endpoint, None)  # enabling beats at once; disabling forgets the history
+        self.alerts.clear(f"external_keepalive:{endpoint}")
+        await self._event(None, "external_keepalive", name=rt.name, endpoint=endpoint, enabled=enabled,
+                          stop_after_min=minutes if enabled else None, account_id=self.account_id)
+        return next(e for e in await self.externals(now) if e["endpoint"] == endpoint)
+
+    async def externals(self, now: float | None = None) -> list[dict[str, Any]]:
+        """The externals snapshot with the cost estimate: rate (CU/h, the gpu_rates table) x time since first seen."""
+        now = now if now is not None else self.now()
+        rows = {row["endpoint"]: row for row in await self.store.externals()}
+        out = []
+        for endpoint, rt in self._externals.items():
+            row = rows.get(endpoint) or {}
+            first = row.get("first_seen") or self._externals_at or now
+            cls = rate_class(rt.hardware, rt.shape)
+            rate, source = await self.store.rate(cls) if cls else (None, None)
+            up_s = max(0.0, now - first)
+            keepalive = bool(row.get("keepalive")) and bool(rt.name)
+            stop_after = row.get("stop_after_min") if keepalive else None
+            since = row.get("keepalive_since") if keepalive else None
+            beat = self._external_beats.get(endpoint, {})
+            out.append({
+                "name": rt.name, "endpoint": endpoint, "hardware": rt.hardware, "shape": rt.shape,
+                "variant": rt.variant, "rate_class": cls, "first_seen": first, "last_seen": row.get("last_seen"),
+                "up_s": round(up_s), "rate_cu_h": rate, "rate_source": source,
+                "cu_spent": round(external_cu(rate, first, now), 3) if rate is not None else None,
+                "keepalive": keepalive, "keepalive_since": since, "stop_after_min": stop_after,
+                "stop_at": since + stop_after * 60 if keepalive and stop_after else None,
+                "last_beat": beat.get("at"), "last_beat_ok": beat.get("ok"), "beat_error": beat.get("error"),
+            })
+        return out
+
+    async def keepalive_externals_once(self) -> None:
+        """One tick of 接管保活: auto-stop expired runtimes (through stop_external), heartbeat the due ones."""
+        if not self.cli.enabled or self.account_change_pending or not self._externals:
+            return
+        now = self.now()
+        rows = {row["endpoint"]: row for row in await self.store.externals() if row["keepalive"]}
+        due: list[tuple[str, str]] = []
+        for endpoint, rt in list(self._externals.items()):
+            row = rows.get(endpoint)
+            if row is None or not rt.name:
+                continue
+            if row["stop_after_min"] and now - (row["keepalive_since"] or now) >= row["stop_after_min"] * 60:
+                try:
+                    await self.stop_external(rt.name, endpoint=endpoint, reason="keepalive_timer")
+                except CreateRefused as exc:
+                    self.alerts.raise_("external_keepalive", f"{rt.name}：保活计时已到，但自动停止失败：{exc}",
+                                       key=f"external_keepalive:{endpoint}", actions=["stop-external"],
+                                       target=rt.name)
+                continue
+            if now - self._external_beats.get(endpoint, {}).get("at", 0.0) >= EXTERNAL_BEAT_S:
+                due.append((endpoint, rt.name))
+        if due:
+            await asyncio.gather(*(self._external_beat(endpoint, name, now) for endpoint, name in due))
+
+    async def _external_beat(self, endpoint: str, name: str, now: float) -> None:
+        beat = self._external_beats.setdefault(endpoint, {"failures": 0})
+        beat["at"] = now
+        res = await self.cli.exec_code(name, EXTERNAL_BEAT_CODE)
+        if endpoint not in self._externals:  # stopped while the heartbeat ran
+            self._external_beats.pop(endpoint, None)
+            return
+        beat["ok"] = res.ok
+        if res.ok:
+            beat.update(failures=0, error=None)
+            self.alerts.clear(f"external_keepalive:{endpoint}")
+            return
+        beat["failures"] = beat.get("failures", 0) + 1
+        beat["error"] = "超时" if res.timed_out else bounded_diagnostic(res.out.strip(), 300) or f"退出码 {res.rc}"
+        if beat["failures"] >= EXTERNAL_BEAT_ALERT_AFTER:
+            self.alerts.raise_("external_keepalive", f"{name}：保活心跳连续 {beat['failures']} 次失败（{beat['error']}），"
+                               "Colab 可能会回收它；见外部运行时", key=f"external_keepalive:{endpoint}")
 
     # ------------------------------------------------------------------------------------------------ stop
     async def stop(self, sid: int, reason: str = "user", foreign: bool = False) -> None:
@@ -1112,20 +1233,22 @@ class Supervisor:
             self._misses[sid] = self._misses.get(sid, 0) + 1
             if self._misses[sid] >= 2:
                 await self._finish(sid, "stopped", "reclaimed", vm_created=True)
-        seen = set()
-        for rt in listing.runtimes:
-            if rt.endpoint in known:
-                continue
-            seen.add(rt.endpoint)
+        # A session still in `creating` has no endpoint yet; its VM under our name is not external.
+        pending = {r["colab_name"] for r in rows if not r["endpoint"] and r["state"] == "creating"}
+        externals = {rt.endpoint: rt for rt in listing.runtimes
+                     if rt.endpoint not in known and not (rt.name and rt.name in pending)}
+        await self._record_externals(externals, self.now())
+        for rt in externals.values():
             if rt.name:
                 self.alerts.raise_("external_runtime", f"运行时 {rt.name!r}（{rt.hardware}）正在计费，但不由 "
-                                   "colabinet 管理（外部运行时）", key=f"external:{rt.endpoint}", actions=["stop-external"],
-                                   target=rt.name)
+                                   "colabinet 管理，见外部运行时", key=f"external:{rt.endpoint}",
+                                   actions=["stop-external"], target=rt.name)
             else:
                 self.alerts.raise_("unknown_runtime", f"一个未命名的运行时 {rt.endpoint}（{rt.hardware}）正在计费，"
-                                   "请在 Colab 网页中停止它", key=f"external:{rt.endpoint}")
+                                   "见外部运行时；它没有本地名称，请在 Colab 网页中停止它", key=f"external:{rt.endpoint}")
         for alert in self.alerts.list():
-            if alert.key.startswith("external:") and alert.key.split(":", 1)[1] not in seen:
+            if alert.key.startswith(("external:", "external_keepalive:")) and \
+                    alert.key.split(":", 1)[1] not in externals:
                 self.alerts.clear(alert.key)
         hidden = listing.usage.active_assignments - len(listing.runtimes) if listing.usage else 0
         if hidden > 0:
@@ -1133,6 +1256,15 @@ class Supervisor:
                                "请检查 Colab 网页", key="assignments_hidden")
         else:
             self.alerts.clear("assignments_hidden")
+
+    async def _record_externals(self, externals: dict[str, Runtime], now: float) -> None:
+        """Replace the externals snapshot and persist first/last seen per endpoint (first_seen survives restarts)."""
+        await self.store.see_externals([(rt.endpoint, rt.name, rt.hardware) for rt in externals.values()], now)
+        self._externals, self._externals_at = externals, now
+        for endpoint in list(self._external_beats):
+            if endpoint not in externals:
+                self._external_beats.pop(endpoint)
+        await self.store.prune_externals(now - EXTERNAL_FORGET_S)
 
     async def guards_once(self) -> None:
         if not self.cli.enabled:
@@ -1220,6 +1352,7 @@ class Supervisor:
             asyncio.create_task(self._loop(self.reconcile_once, self.s.reconcile_s, "reconcile")),
             asyncio.create_task(self._loop(self.guards_once, self.s.guard_s, "guards")),
             asyncio.create_task(self._loop(self.usage_once, self.s.usage_s, "usage")),
+            asyncio.create_task(self._loop(self.keepalive_externals_once, EXTERNAL_TICK_S, "external keepalive")),
         ]
 
     async def shutdown(self, stop_all: bool = False) -> list[str]:
@@ -1263,6 +1396,7 @@ class Supervisor:
             "usage": dataclasses.asdict(self.usage) if self.usage else None,
             "usage_age_s": round(now - self.usage_at) if self.usage_at else None,
             "daily": {"spend": round(await self.spend_today(now), 3), "cap": await self.cap_today(now)},
+            "externals": await self.externals(now),
         }
 
     def reload_presets(self) -> Presets | PresetError:

@@ -20,6 +20,7 @@ from ..api import parse_deadline
 from ..config import GPU_CLASSES, PACKAGE_DIR, VRAM_GB
 from ..diagnostics import redact_diagnostic
 from ..fit import hf_file_gb
+from ..gateway import ui_context as gateway_context
 from ..metrics import CHARTS, GROUPS, MEASURES, TIME_PRESETS, QueryError, QuerySpec, to_csv
 from ..presets import PresetError
 from ..supervisor import CreateRefused, CreateRequest, Supervisor
@@ -154,11 +155,13 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
 
     @router.get("/", response_class=HTMLResponse)
     async def overview(request: Request):
-        return await page(request, "pages/overview.html", "overview", overview_data=await views.overview(sup))
+        return await page(request, "pages/overview.html", "overview", overview_data=await views.overview(sup),
+                          ext=await views.external_runtimes(sup))
 
     @router.get("/sessions", response_class=HTMLResponse)
     async def sessions(request: Request, tab: str = "live"):
-        return await page(request, "pages/sessions.html", "sessions", tab=tab)
+        return await page(request, "pages/sessions.html", "sessions", tab=tab,
+                          ext=await views.external_runtimes(sup))
 
     @router.get("/sessions/{sid}", response_class=HTMLResponse)
     async def session(request: Request, sid: int, tab: str = "overview"):
@@ -225,7 +228,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         if login.state == "idle":
             await login.check()
         response = await page(request, "pages/settings.html", "settings", st=await views.settings(sup),
-                              account=login.snapshot())
+                              account=login.snapshot(), gateway=await gateway_context(sup.s, sup.store))
         response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -273,6 +276,10 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         if part not in ("kpis", "attention", "sessions", "activity", "chart"):
             return HTMLResponse("", 404)
         return partial(request, f"partials/overview_{part}.html", overview_data=await views.overview(sup))
+
+    @router.get("/ui/external", response_class=HTMLResponse)
+    async def external_part(request: Request):
+        return partial(request, "partials/external_runtimes.html", ext=await views.external_runtimes(sup))
 
     @router.get("/ui/sessions/table", response_class=HTMLResponse)
     async def sessions_table(request: Request, tab: str = "live", query: str = Query(default="", alias="q")):
@@ -546,8 +553,37 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
     async def stop_external(request: Request, name: str):
         form = await request.form()
         services.require_confirmation(form.get("confirm") == "yes")
-        _, err = await refused(sup.stop_external, name, expected_account=str(form.get("account_id", "")))
-        return err or toast(Response(status_code=204), "info", f"已请求 Colab 停止 {name}")
+        kwargs = {"endpoint": str(form["endpoint"])} if form.get("endpoint") else {}
+        _, err = await refused(sup.stop_external, name, expected_account=str(form.get("account_id", "")), **kwargs)
+        if err:
+            return err
+        if form.get("card") == "1":  # the 外部运行时 card swaps itself with the refreshed list
+            return toast(partial(request, "partials/external_runtimes.html", ext=await views.external_runtimes(sup)),
+                         "info", f"已请求 Colab 停止 {name}")
+        return toast(Response(status_code=204), "info", f"已请求 Colab 停止 {name}")
+
+    @router.post("/ui/actions/external-keepalive")
+    async def external_keepalive(request: Request):
+        form = await request.form()
+        enabled = form.get("enabled") == "1"
+        try:
+            raw = str(form.get("stop_after_min") or "").strip()
+            minutes = int(raw) if raw else None
+        except ValueError:
+            return JSONResponse({"error": "自动停止时间必须是整数分钟（0 表示不自动停止）"}, 409)
+        row, err = await refused(sup.external_keepalive, str(form.get("endpoint", "")), enabled, minutes,
+                                 expected_account=str(form.get("account_id", "")))
+        if err:
+            return err
+        name = row["name"] or row["endpoint"]
+        if not enabled:
+            message = ("info", f"{name}：已取消接管保活", "Colab 会在闲置约 21-35 分钟后回收它")
+        elif row["stop_after_min"]:
+            message = ("success", f"{name}：已接管保活", f"每 60 秒执行一次心跳，{row['stop_after_min']} 分钟后自动停止")
+        else:
+            message = ("success", f"{name}：已接管保活", "每 60 秒执行一次心跳，不会自动停止（仍在计费）")
+        return toast(partial(request, "partials/external_runtimes.html", ext=await views.external_runtimes(sup)),
+                     *message)
 
     @router.post("/ui/actions/daily-cap/extend")
     async def extend():

@@ -32,18 +32,27 @@ class RunSpec:
     vision: bool = False
     vision_offload: bool = False
     refusal_projection: bool = False
+    links: dict[str, str] = field(default_factory=dict)  # llama.cpp: expected file name -> real file in the repo
+    prewarm: tuple[str, ...] = field(default_factory=tuple)  # llama.cpp: files read into page cache when ready
+
+    def __post_init__(self) -> None:
+        # spec_json stores tuples as lists, and rows written before a field existed lack it: normalise both.
+        object.__setattr__(self, "extra_args", tuple(self.extra_args or ()))
+        object.__setattr__(self, "links", dict(self.links or {}))
+        object.__setattr__(self, "prewarm", tuple(self.prewarm or ()))
 
     @classmethod
     def from_preset(cls, preset: Preset, gpu_class: str, engines: dict[str, dict], **overrides) -> RunSpec:
         d = preset.defaults_for(gpu_class)
         pins = engines.get(preset.engine, {})
-        release = pins.get("release") or (f"{pins['wheel']}@{pins['tabbyapi_commit']}"
+        release = preset.release or pins.get("release") or (f"{pins['wheel']}@{pins['tabbyapi_commit']}"
                                            if pins.get("wheel") and pins.get("tabbyapi_commit") else None)
         spec = cls(engine=preset.engine, repo=preset.repo, file=preset.file, alias=preset.alias or preset.id,
                    ctx=d.ctx, kv=d.kv, parallel=preset.parallel, mmproj=preset.mmproj, mmproj_gpu=d.mmproj_gpu,
                    template=preset.template, preset_id=preset.id, release=release, revision=preset.revision,
                    vision=preset.vision, vision_offload=preset.vision_offload,
-                   refusal_projection=preset.refusal_projection, extra_args=d.extra_args)
+                   refusal_projection=preset.refusal_projection, extra_args=d.extra_args,
+                   links=dict(preset.links), prewarm=tuple(preset.prewarm))
         clean = {k: v for k, v in overrides.items() if v is not None}
         return cls(**{**spec.__dict__, **clean})
 
