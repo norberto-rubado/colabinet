@@ -1,0 +1,101 @@
+{
+  "78": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "anima-turbo-v1.1.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "71": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_06b_base.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    }
+  },
+  "72": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    }
+  },
+  "77": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "71",
+        0
+      ],
+      "text": "__PROMPT__"
+    }
+  },
+  "75": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "71",
+        0
+      ],
+      "text": "worst quality, low quality, score_1, score_2, score_3, blurry, jpeg artifacts"
+    }
+  },
+  "74": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "76": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "78",
+        0
+      ],
+      "positive": [
+        "77",
+        0
+      ],
+      "negative": [
+        "75",
+        0
+      ],
+      "latent_image": [
+        "74",
+        0
+      ],
+      "seed": 0,
+      "steps": 10,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "73": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "76",
+        0
+      ],
+      "vae": [
+        "72",
+        0
+      ]
+    }
+  },
+  "46": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "73",
+        0
+      ],
+      "filename_prefix": "colabinet/anima"
+    }
+  }
+}

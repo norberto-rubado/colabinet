@@ -28,6 +28,9 @@ async def _lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if media := getattr(app.state, "media_supervisor", None):
+            if media._media is not None:
+                await media._media.close()
         if login := getattr(app.state, "google_login", None):
             await login.close()
 
@@ -134,7 +137,8 @@ def create_app(sup: Supervisor, token: str, ui_port: int, csrf: str | None = Non
     async def presets():
         if isinstance(sup.presets, PresetError):
             return JSONResponse({"error": str(sup.presets)}, 500)
-        return [{"id": p.id, "engine": p.engine, "label": p.label, "weights_gb": p.weights_gb, "licence": p.licence}
+        return [{"id": p.id, "engine": p.engine, "label": p.label, "weights_gb": p.weights_gb, "licence": p.licence,
+                 "kind": p.kind, "files": p.files}
                 for p in sup.presets.presets.values()]
 
     @app.get("/api/sessions/{sid}/logs")

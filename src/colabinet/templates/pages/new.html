@@ -18,7 +18,7 @@
           <input type="radio" name="gpu" value="{{ gpu_class }}" {% if gpu_class == gpu %}checked{% endif %}{% if fit and fit.status == 'blocked' and gpu_class != gpu %} disabled{% endif %}>
           <strong>{{ gpu_class }}</strong><span class="cb-gpu-rate">{{ rates[gpu_class] | num(2) }} CU/h</span><span class="cb-muted">{{ (vram[gpu_class] | num(1)) ~ ' GB VRAM' if vram[gpu_class] else '无 GPU' }}</span>
           <span class="cb-gpu-fit">{{ fit.label if fit else '' }}</span>
-          <span class="cb-gpu-speed" title="在预设默认参数下实测">{{ '实测 ' ~ fit.measured.gen ~ ' tok/s' if fit and fit.measured else '' }}</span>
+          <span class="cb-gpu-speed" title="在预设默认参数下实测">{{ '实测 ' ~ fit.measured.gen ~ ' ' ~ (fit.measured.unit | default('tok/s')) if fit and fit.measured else '' }}</span>
         </label>
         {% endfor %}
       </fieldset>
@@ -48,10 +48,10 @@
         <h3>会话</h3>
         <div class="cb-form-grid">
           <div class="field"><label class="label" for="name">名称</label><input class="input" id="name" name="name" required pattern="[A-Za-z0-9_-]+" placeholder="llm"><p class="cb-muted">字母、数字、- 和 _</p></div>
-          <div class="field"><label class="label" for="ctx">上下文</label><input class="input" id="ctx" name="ctx" type="number" min="512" step="256"></div>
-          <div class="field"><label class="label" for="parallel">并行槽位</label><input class="input" id="parallel" name="parallel" type="number" min="1" placeholder="预设默认值"></div>
-          <div class="field"><label class="label" for="kv">KV cache</label><input class="input" id="kv" name="kv" list="kv-types-{{ engine }}" placeholder="{{ 'f32（固定）' if qwen36 else '预设默认值' }}" {% if qwen36 %}disabled{% endif %}><datalist id="kv-types-llamacpp"><option>f16</option><option>q8_0</option><option>q4_0</option></datalist><datalist id="kv-types-exllamav3"><option>FP16</option><option>Q8</option><option>Q6</option><option>Q4</option><option>8,8</option></datalist><datalist id="kv-types-strata"><option>int8</option><option>q4_0</option><option>k8v4</option></datalist></div>
-          <div class="field cb-span-4"><label class="label" for="extra_args">额外推理引擎参数</label><input class="input cb-mono" id="extra_args" name="extra_args" placeholder="{{ '' if qwen36 else 'model.chunk_size=4096' if engine == 'exllamav3' else '--ple-io direct' if engine == 'strata' else '--reasoning-budget 4096' }}"></div>
+          <div class="field" {% if engine == 'comfyui' %}hidden{% endif %}><label class="label" for="ctx">上下文</label><input class="input" id="ctx" name="ctx" type="number" min="512" step="256"></div>
+          <div class="field" {% if engine == 'comfyui' %}hidden{% endif %}><label class="label" for="parallel">并行槽位</label><input class="input" id="parallel" name="parallel" type="number" min="1" placeholder="预设默认值"></div>
+          <div class="field" {% if engine == 'comfyui' %}hidden{% endif %}><label class="label" for="kv">KV cache</label><input class="input" id="kv" name="kv" list="kv-types-{{ engine }}" placeholder="{{ 'f32（固定）' if qwen36 else '预设默认值' }}" {% if qwen36 %}disabled{% endif %}><datalist id="kv-types-llamacpp"><option>f16</option><option>q8_0</option><option>q4_0</option></datalist><datalist id="kv-types-exllamav3"><option>FP16</option><option>Q8</option><option>Q6</option><option>Q4</option><option>8,8</option></datalist><datalist id="kv-types-strata"><option>int8</option><option>q4_0</option><option>k8v4</option></datalist></div>
+          <div class="field cb-span-4" {% if engine == 'comfyui' %}hidden{% endif %}><label class="label" for="extra_args">额外推理引擎参数</label><input class="input cb-mono" id="extra_args" name="extra_args" placeholder="{{ '' if qwen36 else 'model.chunk_size=4096' if engine == 'exllamav3' else '--ple-io direct' if engine == 'strata' else '--reasoning-budget 4096' }}"></div>
           <div class="field cb-span-4" id="projection-field" {% if engine != 'strata' or qwen36 %}hidden{% endif %}>
             <label class="label" for="refusal_projection">实验性拒答投影（Flash-Next）</label>
             <select class="select" id="refusal_projection" name="refusal_projection" {% if engine != 'strata' or qwen36 %}disabled{% endif %}><option value="">预设默认值（内置预设为关闭）</option><option value="false">关闭</option><option value="true">开启 — 实验性</option></select>

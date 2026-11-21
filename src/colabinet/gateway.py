@@ -80,6 +80,8 @@ class Target:
     alias: str | None
     port: int
     created: int
+    engine: str = "llamacpp"
+    kind: str = "text"
 
     @property
     def model_id(self) -> str:
@@ -93,9 +95,11 @@ async def ready_targets(store) -> list[Target]:
         if row.get("state") != "ready" or not row.get("proxy_port"):
             continue
         run = await store.current_run(row["id"])
+        spec = json.loads((run or {}).get("spec_json") or "{}")
         out.append(Target(sid=row["id"], name=row.get("colab_name") or f"session-{row['id']}",
                           alias=(run or {}).get("alias") or None, port=int(row["proxy_port"]),
-                          created=int(row.get("ready_at") or row.get("created_at") or 0)))
+                          created=int(row.get("ready_at") or row.get("created_at") or 0),
+                          engine=(run or {}).get("engine", "llamacpp"), kind=spec.get("kind", "text")))
     out.sort(key=lambda t: t.sid, reverse=True)
     return out
 
@@ -155,6 +159,8 @@ class Gateway:
         self._cache: tuple[float, list[Target]] | None = None
 
     async def aclose(self) -> None:
+        if getattr(self.sup, "_media", None):
+            await self.sup._media.close()
         if self._own_client:
             await self.client.aclose()
 
@@ -195,7 +201,7 @@ class Gateway:
                 "colabinet gateway: missing or invalid API key (use 'Authorization: Bearer KEY' or 'x-api-key')",
                 "authentication_error"), ((b"www-authenticate", b"Bearer"),))
         path, method = scope["path"], scope["method"]
-        if path != "/v1" and not path.startswith("/v1/"):
+        if path != "/v1" and not path.startswith(("/v1/", "/comfy/")):
             return await _send_json(send, 404, _error_body(f"no route {method} {path}", "not_found"))
         body = await _read_body(receive)
         if body is None:
@@ -204,8 +210,21 @@ class Gateway:
         if method == "GET" and path.rstrip("/") == "/v1/models":
             data = json.dumps({"object": "list", "data": [
                 {"id": t.model_id, "object": "model", "created": t.created, "owned_by": "colabinet",
-                 "session": t.name} for t in targets]}).encode()
+                 "session": t.name, "kind": t.kind} for t in targets]}).encode()
             return await _send_json(send, 200, data)
+
+        if path.startswith(("/v1/videos/", "/v1/files/")) or path in ("/v1/images/generations", "/v1/videos"):
+            return await self.media_route(scope, receive, send, targets, body)
+        if path.startswith("/comfy/"):
+            parts = path.split("/", 3)
+            model, upstream_path = parts[2], "/" + (parts[3] if len(parts) > 3 else "")
+            target = next((t for t in targets if t.engine == "comfyui" and model in (t.model_id, t.name)), None)
+            if target is None:
+                return await _send_json(send, 404, _error_body("ComfyUI session not found", "model_not_found"))
+            if upstream_path.startswith("//"):
+                return await _send_json(send, 400, _error_body("invalid ComfyUI path", "invalid_request_error"))
+            raw_scope = {**scope, "path": upstream_path, "comfy_raw": True}
+            return await self.forward(raw_scope, receive, send, target, body, False)
 
         obj = None
         if body:
@@ -224,6 +243,85 @@ class Gateway:
             body = json.dumps(obj).encode()
         stream = isinstance(obj, dict) and obj.get("stream") is True
         await self.forward(scope, receive, send, target, body, stream)
+
+    async def media_route(self, scope, receive, send, targets, raw):
+        from pydantic import ValidationError
+        from starlette.responses import FileResponse
+
+        from .comfy_graphs import ImageRequest, VideoRequest
+        from .media import MediaError, media_service
+
+        path, method = scope["path"], scope["method"]
+        try:
+            service = media_service(self.sup, self.client)
+            if method == "GET" and path.startswith("/v1/files/"):
+                parts = path.split("/")
+                if len(parts) != 5 or parts[4] != "content":
+                    raise MediaError("未找到文件", 404)
+                file, ctype = service.files.content(parts[3])
+                return await FileResponse(file, media_type=ctype, headers={"Cache-Control": "private, no-store"})(
+                    scope, receive, send)
+            if method == "GET" and path.startswith("/v1/videos/"):
+                parts = path.split("/")
+                if len(parts) == 4:
+                    return await _send_json(send, 200, json.dumps(service.video_status(parts[3])).encode())
+                if len(parts) != 5 or parts[4] != "content" or not parts[3].startswith("video_"):
+                    raise MediaError("未找到视频", 404)
+                file, ctype = service.files.content(parts[3])
+                return await FileResponse(file, media_type=ctype, headers={"Cache-Control": "private, no-store"})(
+                    scope, receive, send)
+            if method != "POST" or path not in ("/v1/images/generations", "/v1/videos"):
+                raise MediaError("未找到媒体路由", 404)
+            schema = ImageRequest if path == "/v1/images/generations" else VideoRequest
+            body = schema.model_validate_json(raw)
+            kind = "image" if schema is ImageRequest else "video"
+            # Media routing is exact: a typo must not silently dispatch to the only LLM session.
+            target = next((t for t in targets if t.engine == "comfyui" and t.kind == kind
+                           and body.model in (t.model_id, t.name)), None)
+            if target is None:
+                raise MediaError("没有匹配的已就绪 ComfyUI 媒体会话", 404)
+            if isinstance(body, VideoRequest):
+                result = await service.create_video(target, body)
+                return await _send_json(send, 200, json.dumps(result).encode())
+            # Cold model load can exceed Cloudflare's 100s. Valid leading JSON whitespace keeps it alive.
+            # An owned task preserves activity tracking even if the HTTP client disconnects.
+            task = service.spawn(service.images(target, body))
+            return await self.media_json(send, task)
+        except ValidationError as exc:
+            return await _send_json(send, 400, _error_body(
+                json.dumps(exc.errors(include_input=False, include_url=False), default=str), "invalid_request_error"))
+        except MediaError as exc:
+            return await _send_json(send, exc.status, _error_body(str(exc), "media_error"))
+
+    async def media_json(self, send, task):
+        from .media import MediaError
+
+        early = False
+        wait = self.grace
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=wait)
+            if done:
+                break
+            if not early:
+                await send({"type": "http.response.start", "status": 200, "headers": [
+                    (b"content-type", b"application/json"), (b"cache-control", b"no-store"),
+                    (b"x-accel-buffering", b"no")]})
+                early = True
+            await send({"type": "http.response.body", "body": b" ", "more_body": True})
+            wait = self.interval
+        try:
+            result = task.result()
+            # URLs use the configured public base, not an untrusted Host header.
+            base = self.sup.s.public_api_base.rstrip("/")
+            for item in result["data"]:
+                if "url" in item:
+                    item["url"] = base + item["url"].removeprefix("/v1")
+            data, status = json.dumps(result).encode(), 200
+        except (MediaError, ValueError, KeyError) as exc:
+            data, status = _error_body(str(exc), "media_error"), getattr(exc, "status", 502)
+        if not early:
+            return await _send_json(send, status, data)
+        await send({"type": "http.response.body", "body": data, "more_body": False})
 
     async def forward(self, scope, receive, send, target: Target, body: bytes, stream: bool) -> None:
         host = f"127.0.0.1:{target.port}"
@@ -251,6 +349,9 @@ class Gateway:
                     break
                 if watcher in done:
                     return  # finally cancels the upstream request
+                if scope.get("comfy_raw"):
+                    wait = self.interval
+                    continue  # raw binary /view and uploads must stay byte-for-byte intact
                 if not early:
                     ctype = b"text/event-stream; charset=utf-8" if stream else b"application/json"
                     await send({"type": "http.response.start", "status": 200,

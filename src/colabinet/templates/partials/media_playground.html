@@ -1,0 +1,36 @@
+<nav class="cb-row" role="tablist" aria-label="测试类型" id="media-tabs" data-chat="{{ 'true' if sessions else 'false' }}" data-selected="{{ selected or '' }}">
+  {% if sessions %}<button class="btn" role="tab" data-tab="chat" onclick="cbMediaTab('chat')">对话</button>{% endif %}
+  {% for kind, label in [('image', '生图'), ('video', '生视频')] %}{% if media_sessions | selectattr('media_kind', 'equalto', kind) | list %}
+  <button class="btn" role="tab" data-tab="{{ kind }}" onclick="cbMediaTab('{{ kind }}')">{{ label }}</button>{% endif %}{% endfor %}
+</nav>
+{% for kind, title in [('image', '生图'), ('video', '生视频')] %}
+{% set choices = media_sessions | selectattr('media_kind', 'equalto', kind) | list %}
+{% if choices %}
+<section class="card" id="pg-{{ kind }}-panel" hidden>
+  <header><h2>{{ title }}</h2><p>通过会话隧道提交 ComfyUI 工作流。首次载入模型会较慢。{% if kind == 'video' %}视频包含声音；省略首帧即可文生视频。按秒描述动作和声音，每个镜头只让一个角色说话。{% endif %}</p></header>
+  <section class="cb-form-grid">
+    <div class="field cb-span-2"><label class="label" for="media-{{ kind }}-session">会话</label><select class="select" id="media-{{ kind }}-session">{% for s in choices %}<option value="{{ s.id }}" {% if selected == s.id %}selected{% endif %}>{{ s.colab_name }} · {{ s.run.alias }}</option>{% endfor %}</select></div>
+    {% if kind == 'image' %}
+    <div class="field"><label class="label" for="media-workflow">工作流</label><select class="select" id="media-workflow"><option value="moss">MOSS 写实</option><option value="kroma">Kroma 写实</option><option value="krea2turbo">Krea 2 Turbo</option><option value="h3">H3 大图</option><option value="h3edit">H3 编辑（需上传图像）</option><option value="anima">Anima 动漫</option><option value="wai">WAI 动漫</option></select></div>
+    {% endif %}
+    <div class="field"><label class="label" for="media-{{ kind }}-size">尺寸</label><select class="select" id="media-{{ kind }}-size">{% for size in (['1024x1024', '768x1344', '1344x768', '2048x2048', '4096x4096'] if kind == 'image' else ['768x1344', '1344x768', '1024x1024']) %}<option>{{ size }}</option>{% endfor %}</select></div>
+    <div class="field cb-span-4"><label class="label" for="media-{{ kind }}-prompt">提示词</label><textarea class="textarea" id="media-{{ kind }}-prompt" rows="5" placeholder="描述画面、动作、风格{% if kind == 'video' %}及声音{% endif %}"></textarea></div>
+    <div class="field cb-span-2"><label class="label" for="media-{{ kind }}-image">{{ '待编辑图像' if kind == 'image' else '首帧（可选）' }}</label><input class="input" id="media-{{ kind }}-image" type="file" accept="image/png,image/jpeg,image/webp"></div>
+    <div class="field"><label class="label" for="media-{{ kind }}-seed">随机种子（留空随机）</label><input class="input" id="media-{{ kind }}-seed" type="number" min="0"></div>
+    {% if kind == 'image' %}
+    <div class="field"><label class="cb-switch"><input class="input" id="media-upscale" type="checkbox">SeedVR2 ×2 放大</label></div>
+    <div class="field cb-span-4"><label class="label" for="media-negative">负面提示词（可选）</label><input class="input" id="media-negative"></div>
+    {% else %}
+    <div class="field"><label class="label" for="media-seconds">时长（秒，4–15）</label><input class="input" id="media-seconds" type="number" value="5" min="4" max="15" step="1"></div>
+    <fieldset class="field cb-span-4"><legend class="label">可选 LoRA（默认不启用）</legend>
+      {% for name in ['HMNSFW-AIO-V2.5.safetensors', 'HMNSFW_AIO_V2.safetensors', 'hmpussy_v6_epoch30.safetensors', 'HMPenis_v2_e35.safetensors', 'HMBreastsV2.safetensors', 'HMCumshot_V2.safetensors'] %}
+      <label class="cb-row"><input class="input" type="checkbox" data-media-lora="{{ name }}"> <span>{{ name }}</span><input class="input" type="number" value="1" min="-4" max="4" step="0.1" aria-label="{{ name }} 强度" style="width:6rem"></label>
+      {% endfor %}
+    </fieldset>
+    {% endif %}
+  </section>
+  <footer><button class="btn" id="media-{{ kind }}-send" onclick="cbMediaGenerate('{{ kind }}')">{{ '生成图片' if kind == 'image' else '提交视频任务' }}</button><span id="media-{{ kind }}-status" role="status"></span></footer>
+  <section id="media-{{ kind }}-result" aria-live="polite"></section>
+</section>
+{% endif %}
+{% endfor %}

@@ -39,7 +39,7 @@ ENGINE_ARCHS = {75, 86, 89, 120}
 ENGINE_PACKAGE_MARKER = ".colabinet-package-sha256"
 T0 = time.monotonic()
 STOP_PATTERNS = ("[l]lama-server", "[t]abbyAPI/main.py", "[s]erve/server.py.*--engine strata",
-                 "[/]engine/strata([ -]|$)", "[/]engine/strata-vision([ ]|$)")
+                 "[/]engine/strata([ -]|$)", "[/]engine/strata-vision([ ]|$)", "[/]ComfyUI/main.py")
 EVENT_LOCK = threading.Lock()
 OUTPUT_LOCK = threading.Lock()
 

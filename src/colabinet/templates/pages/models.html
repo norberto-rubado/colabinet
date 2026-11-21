@@ -35,17 +35,19 @@
       <div class="cb-fit-cell" title="{{ f.message }}">
         <strong>{{ f.gpu }}</strong>
         <span class="badge" data-tone="{{ fit_tone(f, preset.engine) }}">{{ f.label }}</span>
-        {% if not (preset.engine in ('exllamav3', 'strata') and f.gpu == 'CPU') %}<span class="cb-muted">上下文：{{ (f.ctx // 1024) }}K<br>KV cache：{{ f.kv }}</span>
+        {% if preset.engine != 'comfyui' and not (preset.engine in ('exllamav3', 'strata') and f.gpu == 'CPU') %}<span class="cb-muted">上下文：{{ (f.ctx // 1024) }}K<br>KV cache：{{ f.kv }}</span>
         {% if f.kv_unknown %}<span class="cb-muted">KV 内存未知</span>{% endif %}{% endif %}
-        {% if f.measured %}<span class="cb-fit-speed" title="{{ f.measured.detail }}">实测 <strong>{{ f.measured.gen }}</strong> tok/s{% if f.measured.prefill %}<br>预填充 {{ f.measured.prefill }} tok/s{% endif %}</span>{% endif %}
+        {% if f.measured %}<span class="cb-fit-speed" title="{{ f.measured.detail }}">实测 <strong>{{ f.measured.gen }}</strong> {{ f.measured.unit | default('tok/s') }}{% if f.measured.prefill %}<br>预填充 {{ f.measured.prefill }} tok/s{% endif %}</span>{% endif %}
       </div>
       {% endfor %}
     </div>
-    {% if preset.measured %}<p class="cb-footnote">{{ icon('info') }}<span>实测：在预设默认参数下，由推理引擎报告的短提示词生成速度，以及 4K token 提示词的预填充速度{% set dates = preset.measured.values() | map(attribute='date') | select | unique | list %}{% if dates %}（{{ dates | join('、') }}）{% endif %}。没有数据的类型表示未测量或无法运行。</span></p>{% endif %}
+    {% if preset.measured and preset.engine != 'comfyui' %}<p class="cb-footnote">{{ icon('info') }}<span>实测：在预设默认参数下，由推理引擎报告的短提示词生成速度，以及 4K token 提示词的预填充速度{% set dates = preset.measured.values() | map(attribute='date') | select | unique | list %}{% if dates %}（{{ dates | join('、') }}）{% endif %}。没有数据的类型表示未测量或无法运行。</span></p>{% endif %}
+    {% if preset.engine == 'comfyui' %}<p class="cb-footnote">{{ item.fit[-1].message }}{% for speed in preset.measured.values() %} {{ speed.note }}{% endfor %}</p>{% else %}
     <p class="cb-footnote">{{ icon('info') }}<span>上下文即 token 上限；KV cache 与模型权重量化相互独立。{% if preset.engine == 'strata' and preset.repo == qwen36_repo %}Qwen3.6 将专家放在 VRAM 和主机内存中。此预设使用固定的 FP32 KV 和 CPU 视觉。{% elif preset.engine == 'strata' %}Strata 使用 GPU 专家缓存加主机内存，以及一个共享的 28.8 GB PLE 表；下载量不等于 VRAM 驻留量。徽标表示已记录的 GPU 实测依据，而非估算的驻留量或完整上下文保证。{% else %}适配结果仅供参考{% if preset.engine == 'llamacpp' %}；CPU 卸载需要足够的主机内存{% endif %}{% if preset.mmproj or preset.vision %}；不含视觉工作区{% endif %}。{% endif %}</span></p>
+    {% endif %}
     {% set benchmarks = preset.evidence.items() | selectattr('1.performance') | list %}
     <dl class="cb-kv cb-perf">
-      <dt>本地请求</dt><dd>{% for bucket in item.measured %}{{ bucket.gpu }}: <strong>{{ bucket.tps | num(1) }} t/s</strong> 中位数（{{ bucket.n }} 次请求，输出 {{ bucket.out | num }} token）{% if not loop.last %} · {% endif %}{% else %}<span class="cb-muted">尚未使用</span>{% endfor %}</dd>
+      {% if preset.engine != 'comfyui' %}<dt>本地请求</dt><dd>{% for bucket in item.measured %}{{ bucket.gpu }}: <strong>{{ bucket.tps | num(1) }} t/s</strong> 中位数（{{ bucket.n }} 次请求，输出 {{ bucket.out | num }} token）{% if not loop.last %} · {% endif %}{% else %}<span class="cb-muted">尚未使用</span>{% endfor %}</dd>{% endif %}
       {% for gpu, evidence in benchmarks %}<dt>已保存的基准测试 · {{ gpu }}</dt><dd>{{ evidence.performance }}</dd>{% endfor %}
     </dl>
     {% if benchmarks %}<p class="cb-footnote">{{ icon('info') }}<span>已保存的原生解码速率不含提示词处理，且与本地请求分开统计。每个配置在所列输入长度上只测量了一轮；设置和缓存状态各不相同。这些样本不能证明投影带来了加速。展开“基准测试依据”可查看来源和设置详情。</span></p>{% endif %}

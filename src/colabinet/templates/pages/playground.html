@@ -3,6 +3,9 @@
 {% block title %}对话测试{% endblock %}
 {% block crumbs %}<h1>对话测试</h1><span class="cb-page-note">与普通客户端一样，通过会话自己的代理端口发送。</span>{% endblock %}
 {% block content %}
+{% set media_sessions = media_sessions | default([]) %}
+{% if media_sessions %}{% include "partials/media_playground.html" %}{% endif %}
+<div id="pg-chat-panel">
 {% if sessions %}
 <div class="cb-playground">
   <section class="card">
@@ -64,4 +67,5 @@
   {% call empty("没有就绪的会话", "请先创建会话并等待其就绪，然后在这里测试。", "playground") %}<div class="cb-row"><a class="btn" data-size="sm" href="/new" {{ nav_attrs() }}>{{ icon('plus') }}新建会话</a><a class="btn" data-size="sm" data-variant="outline" href="/sessions" {{ nav_attrs() }}>查看会话</a></div>{% endcall %}
 </section>
 {% endif %}
+</div>
 {% endblock %}

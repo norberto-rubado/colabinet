@@ -11,14 +11,14 @@
   {{ icon('alert') if danger or caution else icon('check-circle') }}
   <h2>{{ 'GPU 实测依据' if engine == 'strata' else '适配情况' }}（{{ gpu }}）：{{ fit_display.label }}</h2>
   <section>
-    <p>{{ fit_display.message }}</p><p class="cb-muted">上下文：{{ ctx | num }} token · KV cache：{{ kv }}{% if preset %} · {{ preset.label }}{% endif %}</p>
+    <p>{{ fit_display.message }}</p>{% if engine != 'comfyui' %}<p class="cb-muted">上下文：{{ ctx | num }} token · KV cache：{{ kv }}{% if preset %} · {{ preset.label }}{% endif %}</p>{% endif %}
     {% if fit.status == 'blocked' %}<p><strong>{{ gpu }} 无法运行此配置。</strong>请选择未变灰的 GPU，或更改模型、上下文或 KV cache。</p>{% endif %}
     {% if engine == 'strata' %}<p>已启用 GPU 视觉 · 单序列 FIFO · 实验性拒答投影：<strong>{{ '开启' if refusal_projection else '关闭' }}</strong>。</p>{% if refusal_projection %}<p>可减少拒答并改变模型行为，但不保证模型完全无审查。</p>{% endif %}{% endif %}
   </section>
 </div>
 <dl class="cb-kv cb-review" id="cost-lines" data-summary="{{ gpu }}，{{ cost.rate | num(2) }} CU/h{% if cost.idle %}，闲置 {{ cost.idle }} 分钟自动停止{% endif %}{% if cost.cap %}，上限 {{ cost.cap }} CU{% endif %}{% if engine == 'strata' %}. Strata：GPU 视觉，单序列，实验性拒答投影{{ '开启（可减少拒答并改变行为，不保证无审查）' if refusal_projection else '关闭' }}{% endif %}">
   <dt>费率</dt><dd><strong>{{ cost.rate | num(2) }} CU/h</strong></dd>
-  {% if fit.measured %}{% set m = fit.measured %}<dt>实测</dt><dd>在 {{ gpu }} 上以预设默认参数运行：生成 <strong>{{ m.gen }} tok/s</strong>{% if m.prefill %}，4K token 提示词预填充 {{ m.prefill }} tok/s{% endif %}{% if m.date %}（{{ m.date }}）{% endif %}。{% if m.note %}{{ m.note[:1] | upper }}{{ m.note[1:] }}.{% endif %}</dd>{% endif %}
+  {% if fit.measured %}{% set m = fit.measured %}<dt>实测</dt><dd>在 {{ gpu }} 上以预设默认参数运行：生成 <strong>{{ m.gen }} {{ m.unit | default('tok/s') }}</strong>{% if m.prefill %}，4K token 提示词预填充 {{ m.prefill }} tok/s{% endif %}{% if m.date %}（{{ m.date }}）{% endif %}。{% if m.note %}{{ m.note[:1] | upper }}{{ m.note[1:] }}.{% endif %}</dd>{% endif %}
   <dt>许可证</dt><dd>{{ preset.licence if preset and preset.licence else '使用前请查看模型卡' }}</dd>
   <dt>安装</dt><dd>安装和下载时间也会计费，即使端点尚未就绪。</dd>
   <dt>端点端口</dt><dd>{{ cost.endpoint }}</dd>

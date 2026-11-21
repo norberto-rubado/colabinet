@@ -96,7 +96,8 @@ def disk():
 
 def healthy(port, engine="", model=""):
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=3) as r:
+        path = "/system_stats" if engine == "comfyui" else "/health"
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=3) as r:
             if r.status != 200:
                 return False
             if engine == "strata" and json.load(r).get("loaded") is False:
