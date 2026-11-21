@@ -10,7 +10,7 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
-from urllib.parse import urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
@@ -90,6 +90,32 @@ async def read_body(receive, limit: int, declared: bytes | None = None) -> bytes
             return bytes(body)
 
 
+# Characters kept as they are when re-quoting a request path: RFC 3986 pchar plus '/'. With '%' in the set,
+# existing escapes (%2F, %3F, ...) travel on unchanged; without it, a literal '%' becomes %25.
+PATH_SAFE = "/:@!$&'()*+,;=-._~"
+
+
+def bad_path(path: str) -> bool:
+    """`.`/`..` segments (httpx would resolve them and escape /v1) or backslashes in the ASGI-decoded path."""
+    return "\\" in path or any(seg in (".", "..") for seg in path.split("/"))
+
+
+def wire_path(scope) -> str | None:
+    """The request path as it arrived (still percent-encoded), to forward upstream unchanged; None if the request
+    must be refused (R2-01). Forwarding the decoded scope["path"] would let the next hop decode it again:
+    /v1/%252e%252e/props became /v1/../props there, and a decoded %3f/%23 turned into a query or fragment.
+    Refused: an encoded '%' (%25, i.e. double encoding) or a decoded path that would decode further, dot segments
+    or backslashes in the decoded path, and a raw path that does not decode to scope["path"] (what is validated must
+    be what is forwarded)."""
+    path = scope["path"]
+    raw = scope.get("raw_path")
+    # ASGI scopes built by tests or other servers may lack raw_path: use the encoded form of the decoded path.
+    wire = quote(raw, safe=PATH_SAFE + "%") if raw is not None else quote(path, safe=PATH_SAFE)
+    if "%25" in wire or unquote(path) != path or bad_path(path) or unquote(wire) != path:
+        return None
+    return wire
+
+
 async def _send_json(send, status: int, message: str, kind: str) -> None:
     data = json.dumps({"error": {"message": message, "type": kind}}).encode()
     await send({"type": "http.response.start", "status": status,
@@ -131,6 +157,10 @@ class SessionProxy:
         if not host_ok(headers, self.port) or not origin_ok(headers):
             return await _send_json(send, 403, "colabinet: request rejected (Host/Origin)", "forbidden")
         method, path = scope["method"], scope["path"]
+        wire = wire_path(scope)
+        if wire is None:  # R2-01: also here, the gateway is not the only client of this port
+            return await _send_json(send, 400, "colabinet: invalid path", "invalid_request_error")
+        # Body limit and is_inference() use the decoded path validated above; upstream gets the raw `wire` form.
         limit = MAX_UPLOAD_BYTES if path.startswith(("/upload/", "/api/upload/")) else MAX_BODY_BYTES
         try:
             body = await read_body(receive, limit, headers.get(b"content-length"))
@@ -152,7 +182,7 @@ class SessionProxy:
         if inference:
             self.activity.begin(key, t0)
         query = scope.get("query_string", b"").decode("latin-1")
-        url = f"http://127.0.0.1:{route.upstream_port}{path}" + (f"?{query}" if query else "")
+        url = f"http://127.0.0.1:{route.upstream_port}{wire}" + (f"?{query}" if query else "")
         if route.inject_usage and method == "POST" and path.rstrip("/") in ("/v1/chat/completions", "/v1/completions"):
             body = with_usage_option(body)
         fwd_headers = [(k, v) for k, v in scope["headers"]

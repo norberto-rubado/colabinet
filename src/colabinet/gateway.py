@@ -25,10 +25,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import unquote
 
 import httpx
 
-from .proxy import MAX_BODY_BYTES, MAX_UPLOAD_BYTES, BodyTooLarge, read_body
+from .proxy import MAX_BODY_BYTES, MAX_UPLOAD_BYTES, BodyTooLarge, bad_path, read_body, wire_path  # noqa: F401 (bad_path re-exported)
 
 log = logging.getLogger("colabinet.gateway")
 UPLOAD_PATH = re.compile(r"/comfy/[^/]+/(?:api/)?upload/.*")
@@ -128,11 +129,6 @@ def text_targets(targets: list[Target]) -> list[Target]:
     return [t for t in targets if t.engine != "comfyui" and t.kind == "text"]
 
 
-def bad_path(path: str) -> bool:
-    """`.`/`..` segments (httpx would resolve them and escape /v1) or backslashes in the ASGI-decoded path."""
-    return "\\" in path or any(seg in (".", "..") for seg in path.split("/"))
-
-
 def body_limit(path: str) -> int:
     return MAX_UPLOAD_BYTES if UPLOAD_PATH.fullmatch(path) else MAX_BODY_BYTES
 
@@ -141,6 +137,34 @@ def body_limit(path: str) -> int:
 class StreamAborted(Exception):
     """The upstream body broke after our headers went out and the response cannot be ended honestly: raising
     makes the server drop the connection so the client sees an incomplete body instead of a clean end."""
+
+
+def _aborted(exc: BaseException | None) -> bool:
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, StreamAborted):
+            return True
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+class StreamAbortedFilter(logging.Filter):
+    """Drops uvicorn's ERROR "Exception in ASGI application" traceback (~55 lines) for StreamAborted: it is the
+    intended way to drop the connection and forward() already logged one WARNING line for it (R2-05)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info
+        if isinstance(exc, tuple):
+            exc = exc[1]
+        return not (isinstance(exc, BaseException) and _aborted(exc))
+
+
+def install_log_filter(logger: logging.Logger | None = None) -> None:
+    """Idempotent: one StreamAbortedFilter on uvicorn's error logger (it logs unhandled ASGI exceptions)."""
+    logger = logger or logging.getLogger("uvicorn.error")
+    if not any(isinstance(f, StreamAbortedFilter) for f in logger.filters):
+        logger.addFilter(StreamAbortedFilter())
 
 
 def _sse_data(data: bytes) -> bytes:
@@ -176,6 +200,7 @@ class Gateway:
         self.cache_s = cache_s
         self.now = now
         self._cache: tuple[float, list[Target]] | None = None
+        install_log_filter()  # before any uvicorn server serves this app (R2-05)
 
     async def aclose(self) -> None:
         if getattr(self.sup, "_media", None):
@@ -220,7 +245,11 @@ class Gateway:
                 "colabinet gateway: missing or invalid API key (use 'Authorization: Bearer KEY' or 'x-api-key')",
                 "authentication_error"), ((b"www-authenticate", b"Bearer"),))
         path, method = scope["path"], scope["method"]
-        if bad_path(path):  # before routing: httpx would resolve /v1/../x to /x upstream
+        # Before routing: httpx would resolve /v1/../x to /x upstream, and a double-encoded /v1/%252e%252e/x would be
+        # decoded again by the session proxy (R2-01). `path` (decoded, validated) drives routing, the body limit and
+        # media routes; upstream gets the raw `wire` path so %2F, %3F and %23 are never reinterpreted.
+        wire = wire_path(scope)
+        if wire is None:  # wire_path() also applies bad_path() to the decoded path
             return await _send_json(send, 400, _error_body("invalid path", "invalid_request_error"))
         if path != "/v1" and not path.startswith(("/v1/", "/comfy/")):
             return await _send_json(send, 404, _error_body(f"no route {method} {path}", "not_found"))
@@ -245,10 +274,13 @@ class Gateway:
             target = next((t for t in targets if t.engine == "comfyui" and model in (t.model_id, t.name)), None)
             if target is None:
                 return await _send_json(send, 404, _error_body("ComfyUI session not found", "model_not_found"))
-            if upstream_path.startswith("//"):
+            raw_parts = wire.split("/", 3)
+            wire_upstream = "/" + (raw_parts[3] if len(raw_parts) > 3 else "")
+            # The prefix is stripped on the raw path; an encoded '/' in the model segment would shift the split.
+            if upstream_path.startswith("//") or len(raw_parts) < 3 or unquote(raw_parts[2]) != model:
                 return await _send_json(send, 400, _error_body("invalid ComfyUI path", "invalid_request_error"))
             raw_scope = {**scope, "path": upstream_path, "comfy_raw": True}
-            return await self.forward(raw_scope, receive, send, target, body, False)
+            return await self.forward(raw_scope, receive, send, target, body, False, wire_upstream)
 
         obj = None
         if body:
@@ -267,7 +299,7 @@ class Gateway:
             obj["model"] = target.alias
             body = json.dumps(obj).encode()
         stream = isinstance(obj, dict) and obj.get("stream") is True
-        await self.forward(scope, receive, send, target, body, stream)
+        await self.forward(scope, receive, send, target, body, stream, wire)
 
     async def media_route(self, scope, receive, send, targets, raw):
         from pydantic import ValidationError
@@ -362,10 +394,11 @@ class Gateway:
             return await _send_json(send, status, data)
         await send({"type": "http.response.body", "body": data, "more_body": False})
 
-    async def forward(self, scope, receive, send, target: Target, body: bytes, stream: bool) -> None:
+    async def forward(self, scope, receive, send, target: Target, body: bytes, stream: bool, wire: str) -> None:
+        """`wire`: the still percent-encoded upstream path (see wire_path), never the decoded scope["path"]."""
         host = f"127.0.0.1:{target.port}"
         query = scope.get("query_string", b"").decode("latin-1")
-        url = f"http://{host}{scope['path']}" + (f"?{query}" if query else "")
+        url = f"http://{host}{wire}" + (f"?{query}" if query else "")
         fwd = [(k, v) for k, v in scope["headers"] if k.lower() not in DROP_REQUEST]
         fwd.append((b"host", host.encode()))
         request = self.client.build_request(scope["method"], url, headers=fwd, content=body)
@@ -457,11 +490,14 @@ class Gateway:
                     except StopAsyncIteration:
                         break
                     except httpx.HTTPError as e:
-                        log.warning("upstream %s stream broke: %s", host, type(e).__name__)
                         if not sse or (not early and "content-length" in resp.headers):
                             # A clean end would pass the truncated body off as complete (and break a passed-through
-                            # Content-Length): drop the connection instead.
+                            # Content-Length): drop the connection instead. This WARNING is the only log line:
+                            # StreamAbortedFilter hides uvicorn's traceback for it.
+                            log.warning("upstream %s stream broke: %s; dropping the client connection",
+                                        host, type(e).__name__)
                             raise StreamAborted(f"upstream {host} stream broke: {type(e).__name__}") from e
+                        log.warning("upstream %s stream broke: %s", host, type(e).__name__)
                         # Close any half-sent event, then tell the client the stream did not finish.
                         done_event = tail.endswith((b"\n\n", b"\r\n\r\n"))
                         sep = b"" if done_event else b"\n" if tail.endswith(b"\n") else b"\n\n"

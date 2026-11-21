@@ -55,8 +55,9 @@ EXTERNAL_BEAT_CODE = "print(1)\n"
 EXTERNAL_BEAT_ALERT_AFTER = 3  # consecutive failed heartbeats before a warning
 EXTERNAL_FORGET_S = 7 * 86400  # rows of runtimes not listed for this long are deleted
 # ComfyUI idle guard: a failed /queue probe (e.g. the SSH tunnel is down) defers the idle stop only this long after
-# the last successful /queue answer (or ready_at), and a non-empty queue keeps a session alive at most QUEUE_BUSY_MAX_S
-# in a row (a stuck node must not keep a paid VM forever).
+# the last successful /queue answer (or ready_at). A non-empty queue only defers the idle stop, never counts as
+# activity, and only up to QUEUE_BUSY_MAX_S after the last real activity (sessions.last_activity: proxied inference
+# such as POST /prompt, media jobs), so a stuck node cannot keep a paid VM alive across engine_down flaps or restarts.
 QUEUE_GRACE_S = 10 * 60
 QUEUE_BUSY_MAX_S = 6 * 3600
 
@@ -158,7 +159,6 @@ class Supervisor:
         self._externals_at: float | None = None
         self._external_beats: dict[str, dict[str, Any]] = {}  # endpoint -> {at, ok, error, failures}
         self._queue_ok: dict[int, float] = {}  # sid -> last successful ComfyUI /queue answer
-        self._queue_busy_since: dict[int, float] = {}  # sid -> start of the current non-empty /queue streak
 
     # ------------------------------------------------------------------------------------------------- helpers
     def now(self) -> float:
@@ -193,7 +193,7 @@ class Supervisor:
             self.usage, self.usage_at = usage, self.now() if usage else None
             self.alerts.clear("low_balance")
             for alert in self.alerts.list():
-                if alert.key.startswith(("external:", "external_keepalive:")) or alert.key in (
+                if alert.key.startswith(("external:", "external_keepalive:", "external_autostop:")) or alert.key in (
                         "assignments_hidden", "account_reconnect"):
                     self.alerts.clear(alert.key)
             self._externals, self._externals_at = {}, None
@@ -1047,6 +1047,7 @@ class Supervisor:
             self._externals.pop(rt.endpoint, None)
             self._external_beats.pop(rt.endpoint, None)
             self.alerts.clear(f"external_keepalive:{rt.endpoint}")
+            self.alerts.clear(f"external_autostop:{rt.endpoint}")
             await self._event(None, "external_stopped", name=name, account_id=self.account_id,
                               endpoint=rt.endpoint, hardware=rt.hardware, reason=reason)
 
@@ -1068,6 +1069,7 @@ class Supervisor:
         await self.store.set_external_keepalive(endpoint, enabled, now, minutes)
         self._external_beats.pop(endpoint, None)  # enabling beats at once; disabling forgets the history
         self.alerts.clear(f"external_keepalive:{endpoint}")
+        self.alerts.clear(f"external_autostop:{endpoint}")  # a new (or no) timer replaces the expired one
         await self._event(None, "external_keepalive", name=rt.name, endpoint=endpoint, enabled=enabled,
                           stop_after_min=minutes if enabled else None, account_id=self.account_id)
         return next(e for e in await self.externals(now) if e["endpoint"] == endpoint)
@@ -1113,8 +1115,10 @@ class Supervisor:
                 try:
                     await self.stop_external(rt.name, endpoint=endpoint, reason="keepalive_timer")
                 except CreateRefused as exc:
-                    self.alerts.raise_("external_keepalive", f"{rt.name}：保活计时已到，但自动停止失败：{exc}",
-                                       key=f"external_keepalive:{endpoint}", actions=["stop-external"],
+                    # Its own key (R2-03): an earlier heartbeat alert under external_keepalive:* would otherwise
+                    # swallow this one (raise_ only updates the message of an existing key: no stop button, no log).
+                    self.alerts.raise_("external_autostop", f"{rt.name}：保活计时已到，但自动停止失败：{exc}",
+                                       key=f"external_autostop:{endpoint}", actions=["stop-external"],
                                        target=rt.name)
                 continue
             if now - self._external_beats.get(endpoint, {}).get("at", 0.0) >= EXTERNAL_BEAT_S:
@@ -1224,7 +1228,6 @@ class Supervisor:
                                         "tunnel_slow", "endpoint_missing"})
         self._activity.pop(sid, None)
         self._queue_ok.pop(sid, None)
-        self._queue_busy_since.pop(sid, None)
 
     # ---------------------------------------------------------------------------------------------- loops
     async def reconcile_once(self) -> None:
@@ -1296,7 +1299,7 @@ class Supervisor:
                 self.alerts.raise_("unknown_runtime", f"一个未命名的运行时 {rt.endpoint}（{rt.hardware}）正在计费，"
                                    "见外部运行时；它没有本地名称，请在 Colab 网页中停止它", key=f"external:{rt.endpoint}")
         for alert in self.alerts.list():
-            if alert.key.startswith(("external:", "external_keepalive:")) and \
+            if alert.key.startswith(("external:", "external_keepalive:", "external_autostop:")) and \
                     alert.key.split(":", 1)[1] not in externals:
                 self.alerts.clear(alert.key)
         hidden = listing.usage.active_assignments - len(listing.runtimes) if listing.usage else 0
@@ -1324,29 +1327,31 @@ class Supervisor:
             sid = row["id"]
             act = self._activity.get(sid)
             run = await self.store.current_run(sid)
-            defer = False
-            if row["state"] != "ready":
-                self._queue_busy_since.pop(sid, None)
-            elif run and run["engine"] == "comfyui":
+            floor = None  # deferral: the idle clock counts from at least this time (never persisted)
+            # engine_down too: busy no longer refreshes last_activity (R2-04), so one failed /system_stats round must
+            # not idle-stop a render that is still running; a failed probe there gets the R1-01 grace only.
+            if row["state"] in ("ready", "engine_down") and run and run["engine"] == "comfyui":
                 try:
                     response = await self.http.get(f"http://127.0.0.1:{row['hidden_port']}/queue", timeout=5)
                     response.raise_for_status()
                     queue = response.json()
                     busy = bool(queue.get("queue_running") or queue.get("queue_pending"))
                     self._queue_ok[sid] = now
-                    if not busy:
-                        self._queue_busy_since.pop(sid, None)
-                    elif now - self._queue_busy_since.setdefault(sid, now) <= QUEUE_BUSY_MAX_S:
-                        act = self._activity.setdefault(sid, Activity())
-                        act.reset(now)
+                    if busy:
+                        # Deferring only (R2-04): the busy cap counts from the persisted real activity, which a busy
+                        # queue never refreshes, so neither a state flap nor a service restart restarts it. Past the
+                        # cap the normal idle countdown (with its warning) runs from real + QUEUE_BUSY_MAX_S.
+                        real = max(row["last_activity"] or row.get("ready_at") or 0.0, act.last if act else 0.0)
+                        floor = min(now, real + QUEUE_BUSY_MAX_S)
                 except (httpx.HTTPError, ValueError, AttributeError):
                     # Unknown queue is not proof of idleness, but only for a while (the tunnel may never come back).
                     # Deferring is never persisted as last_activity. Health recovery / budget guards still run.
                     since = max(self._queue_ok.get(sid, 0.0), row.get("ready_at") or 0.0)
-                    defer = now - since <= QUEUE_GRACE_S
+                    if now - since <= QUEUE_GRACE_S:
+                        floor = now
             last = act.effective(now) if act else (row["last_activity"] or 0.0)
-            if defer:
-                last = now
+            if floor is not None:
+                last = max(last, floor)
             d = evaluate(row, now, last, self.s.grace_s)
             if d.action == "stop":
                 await self._event(sid, "guard", reason=d.reason, message=d.message)

@@ -305,7 +305,7 @@ async def test_auto_stop_refuses_a_recreated_runtime_with_the_same_name(sup, cli
     clock.advance(120)
     await sup.keepalive_externals_once()
     assert cli.stops == []
-    assert any(a.key == "external_keepalive:gpu-g4-s-1" for a in sup.alerts.list())
+    assert any(a.key == "external_autostop:gpu-g4-s-1" for a in sup.alerts.list())  # own key since R2-03
 
 
 async def test_heartbeat_uses_the_cli_exec_helper(tmp_path):

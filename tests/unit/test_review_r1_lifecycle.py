@@ -135,8 +135,9 @@ async def test_r1_01_nonempty_queue_keeps_session_alive_at_most_the_busy_cap(tmp
     assert QUEUE_BUSY_MAX_S <= elapsed <= QUEUE_BUSY_MAX_S + 30 * 60 + 60
 
 
-async def test_r1_01_busy_cap_restarts_after_the_queue_drains(tmp_path):
-    """R1-01: the busy cap is per streak: a queue that empties and fills again starts a new streak."""
+async def test_r1_01_busy_cap_restarts_after_real_activity(tmp_path):
+    """R1-01 (changed by R2-04): the busy cap counts from the last real activity, not from a queue streak: a queue
+    that drains and refills does not restart it, a real request (e.g. a proxied POST /prompt) does."""
     state = {"busy": True}
 
     def upstream(request):
@@ -146,14 +147,19 @@ async def test_r1_01_busy_cap_restarts_after_the_queue_drains(tmp_path):
     async with client:
         clock.t += QUEUE_BUSY_MAX_S - 60
         await sup.guards_once()
+        assert not sup.stop.called and row["last_activity"] == 1000.0  # busy defers, is never activity
+        real = clock.t
+        sup._activity[1].end(99, real, useful=True)  # a real request finished now: a new cap
         state["busy"] = False
         clock.t += 60
         await sup.guards_once()
-        state["busy"] = True
-        clock.t += 60
+        state["busy"] = True  # drained and refilled: no new cap
+        clock.t = real + QUEUE_BUSY_MAX_S - 60
         await sup.guards_once()
-        assert sup._queue_busy_since[1] == clock.t
-        assert not sup.stop.called
+        assert not sup.stop.called and row["last_activity"] == real
+        clock.t = real + QUEUE_BUSY_MAX_S + 30 * 60 + 60  # cap + idle_min after the real request: idles out
+        await sup.guards_once()
+        assert sup.stop.called and sup.stop.call_args.args == (1, "idle")
 
 
 # ------------------------------------------------------------------------------------------------------- R1-03
@@ -209,14 +215,15 @@ async def test_r1_03_manual_stop_failure_raises_and_keeps_keepalive(ext, store):
 
 
 async def test_r1_03_keepalive_timer_alerts_and_retries_until_stopped(ext, store, clock):
-    """R1-03: an expired keepalive timer whose stop fails raises external_keepalive and retries on the next tick."""
+    """R1-03: an expired keepalive timer whose stop fails raises an alert (external_autostop since R2-03) and retries
+    on the next tick."""
     sup, cli = ext
     await sup.reconcile_once()
     await sup.external_keepalive("gpu-g4-ext-1", True, stop_after_min=10)
     clock.advance(600)
     await sup.keepalive_externals_once()
     assert cli.stops == 1
-    alerts = [a for a in sup.alerts.list() if a.key == "external_keepalive:gpu-g4-ext-1"]
+    alerts = [a for a in sup.alerts.list() if a.key == "external_autostop:gpu-g4-ext-1"]
     assert alerts and "自动停止失败" in alerts[0].message and "colab stop 失败" in alerts[0].message
     row = await store.external("gpu-g4-ext-1")
     assert row["keepalive"] == 1 and row["stop_after_min"] == 10
@@ -230,7 +237,8 @@ async def test_r1_03_keepalive_timer_alerts_and_retries_until_stopped(ext, store
     assert cli.stops == 3
     row = await store.external("gpu-g4-ext-1")
     assert row["keepalive"] == 0 and "gpu-g4-ext-1" not in sup._externals
-    assert not [a for a in sup.alerts.list() if a.key == "external_keepalive:gpu-g4-ext-1"]
+    assert not [a for a in sup.alerts.list() if a.key in ("external_keepalive:gpu-g4-ext-1",
+                                                          "external_autostop:gpu-g4-ext-1")]
 
 
 # ------------------------------------------------------------------------------------------------------- R1-11

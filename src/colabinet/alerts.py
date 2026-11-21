@@ -14,6 +14,7 @@ log = logging.getLogger("colabinet.alerts")
 CRITICAL_KINDS = {
     "stop_unconfirmed", "external_runtime", "unknown_runtime", "gpu_mismatch", "daily_cap", "create_slow",
     "engine_down", "low_balance", "create_orphan", "endpoint_missing", "foreign_vm", "ssh_429",
+    "external_autostop",  # an expired 接管保活 timer could not stop the runtime: it keeps billing
 }
 
 

@@ -298,7 +298,9 @@ class MediaService:
             raise MediaError("image 输入图像只用于 h3edit 工作流")
         act, key = self.activity(target), -secrets.randbits(63)
         act.begin(key, self.sup.now())
-        useful = True
+        # Only a delivered result restarts the idle clock (R2-02): a 400, a 502 from a broken tunnel, a vanished
+        # prompt, a failed save or a cancellation must not keep a paid VM alive when a client keeps retrying.
+        useful = False
         try:
             image_name = await self.upload(target, body.image, ua) if body.image else None
             seed = body.seed if body.seed is not None else secrets.randbits(63)
@@ -314,10 +316,8 @@ class MediaService:
                 else:
                     ident = self.files.save(data, ctype)
                     result.append({"url": f"/v1/files/{ident}/content"})
+            useful = True
             return {"created": int(self.now()), "data": result}
-        except PromptVanished:
-            useful = False  # nothing ran to completion: do not restart the idle clock
-            raise
         finally:
             act.end(key, self.sup.now(), useful=useful)
 
@@ -349,7 +349,7 @@ class MediaService:
 
     async def _video(self, target, job, act, key, ua=USER_AGENTS["gateway"]):
         ident = job["id"]
-        useful = True
+        useful = False  # only a completed, saved video restarts the idle clock (R2-02)
 
         def update(status, progress):
             job.update(status=status, progress=progress)
@@ -366,11 +366,11 @@ class MediaService:
                 raise MediaError("ComfyUI 没有返回 MP4 视频", 502)
             self.files.save(data, ctype, ident)
             job.update(status="completed", progress=100, content_type="video/mp4")
+            useful = True
         except asyncio.CancelledError:
             job.update(status="failed", error="服务已关闭；原始任务可能仍在 VM 上执行")
             raise
         except PromptVanished as exc:
-            useful = False
             job.update(status="failed", error=str(exc))
         except Exception as exc:
             job.update(status="failed", error=str(exc)[:1500])
