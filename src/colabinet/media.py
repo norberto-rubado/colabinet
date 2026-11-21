@@ -285,16 +285,18 @@ class MediaService:
 
     async def create_video(self, target, body: VideoRequest):
         self.files.prune()
-        available = (await self.request(target, "GET", "/models/loras")).json() if body.loras else []
-        for lora in body.loras:
-            if lora.name not in available:
-                raise MediaError(f"VM 上没有此 LoRA：{lora.name}")
-        image_name = await self.upload(target, body.image) if body.image else None
-        seed = body.seed if body.seed is not None else secrets.randbits(63)
         ident = "video_" + uuid.uuid4().hex
+        # Begin before the first VM request: a 32 MiB first-frame upload is not an inference path and the Comfy
+        # queue is still empty, so without this the idle guard could stop the runtime mid-upload.
         act, key = self.activity(target), -secrets.randbits(63)
         act.begin(key, self.sup.now())
         try:
+            available = (await self.request(target, "GET", "/models/loras")).json() if body.loras else []
+            for lora in body.loras:
+                if lora.name not in available:
+                    raise MediaError(f"VM 上没有此 LoRA：{lora.name}")
+            image_name = await self.upload(target, body.image) if body.image else None
+            seed = body.seed if body.seed is not None else secrets.randbits(63)
             prompt_id = await self.submit(target, video_graph(body, seed, image_name))
         except BaseException:
             act.end(key, self.sup.now(), useful=False)

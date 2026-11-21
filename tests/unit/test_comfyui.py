@@ -100,9 +100,14 @@ def test_image_graphs(workflow, steps):
     samplers = [n["inputs"] for n in graph.values() if n["class_type"] == "KSampler"]
     assert samplers[0]["seed"] == 123 and samplers[0]["steps"] == steps
     assert "a landscape" in json.dumps(graph)
-    other = image_graph(body.model_copy(update={"negative_prompt": "bad", "steps": 2}), 456, "uploaded.png")
-    assert other != graph
-    assert any(n["inputs"].get("text") == "bad" for n in other.values())
+    if workflow in ("moss", "wai"):
+        other = image_graph(body.model_copy(update={"negative_prompt": "bad", "steps": 2}), 456, "uploaded.png")
+        assert other != graph
+        assert any(n["inputs"].get("text") == "bad" for n in other.values())
+    else:
+        # cfg=1.0 graphs: ComfyUI skips uncond, so a negative prompt would be silently ignored -> reject it.
+        with pytest.raises(ValueError, match="负面提示词不会生效"):
+            ImageRequest(model="image", prompt="a landscape", workflow=workflow, negative_prompt="bad")
     assert image_graph(body, 123, "uploaded.png") == graph  # no mutation across requests
     if workflow == "h3edit":
         assert graph["5"]["inputs"]["images.image_1"] == ["20", 0]

@@ -204,6 +204,25 @@ async def test_video_unknown_lora_rejected_without_submit(media):
     r = await media.c.post("/v1/videos", headers=AUTH, json={"model": "videos", "prompt": "x",
         "loras": [{"name": "not-installed.safetensors", "strength": 1}]})
     assert r.status_code == 400 and not media.comfy.graphs
+    assert not media.sup._activity[2]._inflight  # failure path releases the idle guard
+
+
+async def test_video_first_frame_upload_is_idle_protected(media):
+    # The upload is not an inference path and the Comfy queue is still empty: activity must already be held.
+    seen = []
+    original = media.service.upload_bytes
+
+    async def upload_bytes(target, *args, **kwargs):
+        seen.append(bool(media.sup._activity[target.sid]._inflight))
+        return await original(target, *args, **kwargs)
+
+    media.service.upload_bytes = upload_bytes
+    r = await media.c.post("/v1/videos", headers=AUTH, json={
+        "model": "videos", "prompt": "x", "image": base64.b64encode(PNG).decode()})
+    assert r.status_code == 200, r.text
+    assert seen == [True]
+    await finish_video(media, r.json()["id"])
+    assert not media.sup._activity[2]._inflight
 
 
 async def test_video_failure_and_restart_durable_status(media):

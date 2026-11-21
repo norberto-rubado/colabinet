@@ -19,7 +19,7 @@
     <div class="field"><label class="label" for="media-{{ kind }}-seed">随机种子（留空随机）</label><input class="input" id="media-{{ kind }}-seed" type="number" min="0"></div>
     {% if kind == 'image' %}
     <div class="field"><label class="cb-switch"><input class="input" id="media-upscale" type="checkbox">SeedVR2 ×2 放大</label></div>
-    <div class="field cb-span-4"><label class="label" for="media-negative">负面提示词（可选）</label><input class="input" id="media-negative"></div>
+    <div class="field cb-span-4"><label class="label" for="media-negative">负面提示词（可选，仅 MOSS / WAI 生效）</label><input class="input" id="media-negative"></div>
     {% else %}
     <div class="field"><label class="label" for="media-seconds">时长（秒，4–15）</label><input class="input" id="media-seconds" type="number" value="5" min="4" max="15" step="1"></div>
     <fieldset class="field cb-span-4"><legend class="label">可选 LoRA（默认不启用）</legend>

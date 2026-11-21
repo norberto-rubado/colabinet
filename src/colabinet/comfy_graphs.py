@@ -9,9 +9,12 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 WORKFLOWS = ("moss", "kroma", "krea2turbo", "h3", "h3edit", "anima", "wai")
+# Distilled/turbo graphs sample at cfg=1.0, where ComfyUI skips the uncond pass entirely (comfy/samplers.py), so a
+# negative prompt would be accepted and silently ignored. Only graphs with real CFG take one.
+NEGATIVE_WORKFLOWS = ("moss", "wai")
 TEMPLATES = Path(__file__).with_name("workflows")
 
 
@@ -34,6 +37,13 @@ class ImageRequest(BaseModel):
     def check_size(cls, value):
         dimensions(value)
         return value
+
+    @model_validator(mode="after")
+    def check_negative(self):
+        if self.negative_prompt and self.workflow not in NEGATIVE_WORKFLOWS:
+            raise ValueError(f"{self.workflow} 是蒸馏/Turbo 工作流（CFG=1），负面提示词不会生效；"
+                             f"只有 {'、'.join(NEGATIVE_WORKFLOWS)} 支持 negative_prompt")
+        return self
 
 
 class Lora(BaseModel):
