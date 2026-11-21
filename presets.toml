@@ -359,7 +359,7 @@ T4-HIGHMEM = { gen_tps = 18.954, prefill_tps = 73.7, date = "2026-11-19", note =
 L4 = { gen_tps = 33.084, prefill_tps = 338.82, date = "2026-11-19", note = "3 warmed requests, Strata 0.1.60" }
 A100 = { gen_tps = 76.136, prefill_tps = 2745.42, date = "2026-11-19", note = "3 warmed requests, Strata 0.1.61" }
 A100-80 = { gen_tps = 71.897, prefill_tps = 2941.33, date = "2026-11-19", note = "3 warmed requests, Strata 0.1.61" }
-G4 = { gen_tps = 48.5, prefill_tps = 3150, date = "2026-10-13" }
+G4 = { gen_tps = 88.1, prefill_tps = 3698, date = "2026-11-21", note = "实测：Strata 0.2.x + MTP，开去拒答投影；短回答 88 tok/s，写 2000 token 代码 188.5 tok/s（MTP 命中率随输出变长而升高）；开机到就绪 8 分钟" }
 
 [[preset]]
 id = "qwen38-flash-next-strata-iq3-s"
@@ -558,6 +558,9 @@ kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "1024", "-ub", "512", "--cache-ram", "60000",
               "-lm", "mmap", "--lazy-mode", "on"]
 
+[preset.measured]
+G4 = { gen_tps = 105.9, prefill_tps = 3827, date = "2026-11-21", note = "实测：b12584，经公网网关；开机到就绪 5.5 分钟；原版会拒绝写 SYN 扫描器" }
+
 [[preset]]
 id = "dsv41-flash-coder-ista-iq2xxs-engram"
 engine = "llamacpp"
@@ -577,3 +580,6 @@ prewarm = ["DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf"]
 ctx = 131072
 kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24"]
+
+[preset.measured]
+G4 = { gen_tps = 59.3, date = "2026-11-21", note = "实测：b12584，Engram 预读完成后；开机到就绪 13 分钟，之后再预读约 5 分钟。关思考用 reasoning_effort=none" }
