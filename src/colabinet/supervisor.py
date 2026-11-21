@@ -29,7 +29,7 @@ from .diagnostics import bounded_diagnostic
 from .engines import ENGINES, VM_ROOT, Engine, RunSpec
 from .engines.base import VM_DIR
 from .engines.strata import QWEN36_CTX, QWEN36_KV, QWEN36_REPO
-from .guards import evaluate, evaluate_daily
+from .guards import IDLE_STATES, evaluate, evaluate_daily
 from .net import first_free, port_free
 from .presets import PresetError, Presets, load_presets
 from .proxy import ProxyManager, Route, SessionProxy
@@ -54,10 +54,14 @@ EXTERNAL_TICK_S = 15.0
 EXTERNAL_BEAT_CODE = "print(1)\n"
 EXTERNAL_BEAT_ALERT_AFTER = 3  # consecutive failed heartbeats before a warning
 EXTERNAL_FORGET_S = 7 * 86400  # rows of runtimes not listed for this long are deleted
+# Alert keys "<prefix><endpoint>" about one external runtime, cleared when it leaves the listing or on account change.
+EXTERNAL_ALERT_PREFIXES = ("external:", "external_keepalive:", "external_autostop:", "external_unnamed:")
 # ComfyUI idle guard: a failed /queue probe (e.g. the SSH tunnel is down) defers the idle stop only this long after
 # the last successful /queue answer (or ready_at). A non-empty queue only defers the idle stop, never counts as
 # activity, and only up to QUEUE_BUSY_MAX_S after the last real activity (sessions.last_activity: proxied inference
 # such as POST /prompt, media jobs), so a stuck node cannot keep a paid VM alive across engine_down flaps or restarts.
+# The busy deferral is kept as an in-memory watermark (Supervisor._queue_busy_floor, R3-01) so a long render that
+# drains still gets the whole idle_min window (with its idle_warn) to fetch its outputs.
 QUEUE_GRACE_S = 10 * 60
 QUEUE_BUSY_MAX_S = 6 * 3600
 
@@ -74,6 +78,10 @@ def stop_if_cancelled() -> None:
 
 class CreateRefused(Exception):
     pass
+
+
+class ExternalUnnamed(CreateRefused):
+    """The external runtime is still listed but lost its CLI name: nothing can stop it by name (R3-05)."""
 
 
 def external_cu(rate_cu_h: float, first_seen: float, now: float) -> float:
@@ -159,6 +167,9 @@ class Supervisor:
         self._externals_at: float | None = None
         self._external_beats: dict[str, dict[str, Any]] = {}  # endpoint -> {at, ok, error, failures}
         self._queue_ok: dict[int, float] = {}  # sid -> last successful ComfyUI /queue answer
+        # sid -> latest time a busy ComfyUI queue deferred the idle clock to (never persisted, capped at the persisted
+        # last real activity + QUEUE_BUSY_MAX_S): after the queue drains the idle countdown starts from here (R3-01).
+        self._queue_busy_floor: dict[int, float] = {}
 
     # ------------------------------------------------------------------------------------------------- helpers
     def now(self) -> float:
@@ -193,7 +204,7 @@ class Supervisor:
             self.usage, self.usage_at = usage, self.now() if usage else None
             self.alerts.clear("low_balance")
             for alert in self.alerts.list():
-                if alert.key.startswith(("external:", "external_keepalive:", "external_autostop:")) or alert.key in (
+                if alert.key.startswith(EXTERNAL_ALERT_PREFIXES) or alert.key in (
                         "assignments_hidden", "account_reconnect"):
                     self.alerts.clear(alert.key)
             self._externals, self._externals_at = {}, None
@@ -997,6 +1008,7 @@ class Supervisor:
             spec = RunSpec(**{**old, **{k: v for k, v in overrides.items() if v is not None}})
         self._validate_spec(spec, row["gpu_class"] or row["gpu_requested"])
         await self._cancel_driver(sid)
+        self._queue_busy_floor.pop(sid, None)  # a new run: the old run's renders no longer defer the idle stop
         now = self.now()
         run_id = await self.store.replace_run(
             sid, now, engine=spec.engine, preset_id=spec.preset_id, repo=spec.repo,
@@ -1031,25 +1043,49 @@ class Supervisor:
             if await self.store.name_in_use(name):
                 raise CreateRefused(f"{name!r} 是托管会话：请通过会话 id 停止它")
             listing = await self.fresh_listing()
+            if endpoint and reason == "keepalive_timer" and listing.trusted and \
+                    not any(r.endpoint == endpoint for r in listing.runtimes):
+                # R3-05: the timer's VM is already gone (stopped elsewhere, or NAME now is a re-created VM): its
+                # job is done. No stop for the successor, no CRITICAL "auto-stop failed" alert.
+                gone = self._externals.get(endpoint)
+                return await self._external_gone(endpoint, name, gone.hardware if gone else None, reason)
             rt = listing.named(name) if listing.trusted else None
+            listed = next((r for r in listing.runtimes if r.endpoint == endpoint), None) if endpoint else None
+            if listing.trusted and listed is not None and not listed.name:
+                if endpoint in self._externals:
+                    self._externals[endpoint] = listed  # the card shows it unnamed before the next reconcile
+                raise ExternalUnnamed(f"运行时 {endpoint} 已没有本地 CLI 名称，无法按名称停止；请在 Colab 网页中停止它")
             if not rt:
                 raise CreateRefused(f"列表中没有名为 {name!r} 的运行时")
             if endpoint and rt.endpoint != endpoint:
                 raise CreateRefused(f"名为 {name!r} 的运行时已不是这台 VM（它可能已被停止并重新创建）；请刷新后重试")
             res = await self.cli.stop(name)
             if not res.ok:
+                after = await self.fresh_listing()
+                if after.trusted and not any(r.endpoint == rt.endpoint for r in after.runtimes):
+                    # R3-05: `colab stop` failed because the runtime was already gone: that is a stopped runtime.
+                    return await self._external_gone(rt.endpoint, name, rt.hardware, reason)
                 # Keep keepalive / stop_after_min and the snapshot: the keepalive tick alerts and retries next tick.
                 why = "超时" if res.timed_out else bounded_diagnostic(res.out.strip(), 200) or f"退出码 {res.rc}"
                 raise CreateRefused(f"colab stop 失败：{why}")
-            row = await self.store.external(rt.endpoint)
-            if row and row["keepalive"]:
-                await self.store.set_external_keepalive(rt.endpoint, False, None, None)
-            self._externals.pop(rt.endpoint, None)
-            self._external_beats.pop(rt.endpoint, None)
-            self.alerts.clear(f"external_keepalive:{rt.endpoint}")
-            self.alerts.clear(f"external_autostop:{rt.endpoint}")
+            await self._forget_external(rt.endpoint)
             await self._event(None, "external_stopped", name=name, account_id=self.account_id,
                               endpoint=rt.endpoint, hardware=rt.hardware, reason=reason)
+
+    async def _forget_external(self, endpoint: str) -> None:
+        """A stopped external runtime: keepalive off, snapshot, heartbeat history and its alerts gone."""
+        row = await self.store.external(endpoint)
+        if row and row["keepalive"]:
+            await self.store.set_external_keepalive(endpoint, False, None, None)
+        self._externals.pop(endpoint, None)
+        self._external_beats.pop(endpoint, None)
+        for prefix in EXTERNAL_ALERT_PREFIXES[1:]:  # external:{endpoint} goes with the next reconcile
+            self.alerts.clear(f"{prefix}{endpoint}")
+
+    async def _external_gone(self, endpoint: str, name: str, hardware: str | None, reason: str) -> None:
+        await self._forget_external(endpoint)
+        await self._event(None, "external_stopped", name=name, account_id=self.account_id, endpoint=endpoint,
+                          hardware=hardware, reason="already_gone", requested=reason)
 
     async def external_keepalive(self, endpoint: str, enabled: bool, stop_after_min: int | None = None,
                                  expected_account: str | None = None) -> dict[str, Any]:
@@ -1070,6 +1106,7 @@ class Supervisor:
         self._external_beats.pop(endpoint, None)  # enabling beats at once; disabling forgets the history
         self.alerts.clear(f"external_keepalive:{endpoint}")
         self.alerts.clear(f"external_autostop:{endpoint}")  # a new (or no) timer replaces the expired one
+        self.alerts.clear(f"external_unnamed:{endpoint}")  # turning keepalive off is how its warning is cancelled
         await self._event(None, "external_keepalive", name=rt.name, endpoint=endpoint, enabled=enabled,
                           stop_after_min=minutes if enabled else None, account_id=self.account_id)
         return next(e for e in await self.externals(now) if e["endpoint"] == endpoint)
@@ -1086,6 +1123,7 @@ class Supervisor:
             rate, source = await self.store.rate(cls) if cls else (None, None)
             up_s = max(0.0, now - first)
             keepalive = bool(row.get("keepalive")) and bool(rt.name)
+            keepalive_unnamed = bool(row.get("keepalive")) and not rt.name  # R3-05: can only be turned off
             stop_after = row.get("stop_after_min") if keepalive else None
             since = row.get("keepalive_since") if keepalive else None
             beat = self._external_beats.get(endpoint, {})
@@ -1094,7 +1132,8 @@ class Supervisor:
                 "variant": rt.variant, "rate_class": cls, "first_seen": first, "last_seen": row.get("last_seen"),
                 "up_s": round(up_s), "rate_cu_h": rate, "rate_source": source,
                 "cu_spent": round(external_cu(rate, first, now), 3) if rate is not None else None,
-                "keepalive": keepalive, "keepalive_since": since, "stop_after_min": stop_after,
+                "keepalive": keepalive, "keepalive_unnamed": keepalive_unnamed, "keepalive_since": since,
+                "stop_after_min": stop_after,
                 "stop_at": since + stop_after * 60 if keepalive and stop_after else None,
                 "last_beat": beat.get("at"), "last_beat_ok": beat.get("ok"), "beat_error": beat.get("error"),
             })
@@ -1109,22 +1148,39 @@ class Supervisor:
         due: list[tuple[str, str]] = []
         for endpoint, rt in list(self._externals.items()):
             row = rows.get(endpoint)
-            if row is None or not rt.name:
+            if row is None:
                 continue
+            if not rt.name:
+                self._warn_unnamed(endpoint, rt)
+                continue
+            self.alerts.clear(f"external_unnamed:{endpoint}")
             if row["stop_after_min"] and now - (row["keepalive_since"] or now) >= row["stop_after_min"] * 60:
                 try:
                     await self.stop_external(rt.name, endpoint=endpoint, reason="keepalive_timer")
+                except ExternalUnnamed:
+                    self._warn_unnamed(endpoint, self._externals.get(endpoint, rt))
                 except CreateRefused as exc:
                     # Its own key (R2-03): an earlier heartbeat alert under external_keepalive:* would otherwise
                     # swallow this one (raise_ only updates the message of an existing key: no stop button, no log).
+                    # The endpoint travels with the button (R3-05): it must not stop a re-created VM of that name.
                     self.alerts.raise_("external_autostop", f"{rt.name}：保活计时已到，但自动停止失败：{exc}",
                                        key=f"external_autostop:{endpoint}", actions=["stop-external"],
-                                       target=rt.name)
+                                       target=rt.name, endpoint=endpoint)
                 continue
             if now - self._external_beats.get(endpoint, {}).get("at", 0.0) >= EXTERNAL_BEAT_S:
                 due.append((endpoint, rt.name))
         if due:
             await asyncio.gather(*(self._external_beat(endpoint, name, now) for endpoint, name in due))
+
+    def _warn_unnamed(self, endpoint: str, rt: Runtime) -> None:
+        """R3-05: a kept-alive runtime without a CLI name can be neither beaten nor stopped by colabinet. Not a stop
+        button that can only fail: a warning that says so, cancelled by turning keepalive off (or when it is gone)."""
+        self.alerts.clear(f"external_autostop:{endpoint}")
+        self.alerts.clear(f"external_keepalive:{endpoint}")
+        self.alerts.raise_("external_unnamed", f"接管保活的运行时 {endpoint}（{rt.hardware}）已没有本地 CLI 名称，"
+                           "colabinet 无法再为它执行心跳或按名称自动停止；它可能仍在计费，请在 Colab 网页中停止它，"
+                           "或取消接管保活以关闭此提示", key=f"external_unnamed:{endpoint}", actions=["keepalive-off"],
+                           endpoint=endpoint)
 
     async def _external_beat(self, endpoint: str, name: str, now: float) -> None:
         beat = self._external_beats.setdefault(endpoint, {"failures": 0})
@@ -1154,6 +1210,8 @@ class Supervisor:
         self._own_account(row)
         if row is None or row["state"] in ("stopped", "failed", "stopping"):
             return
+        if reason == "idle" and row["state"] not in IDLE_STATES:
+            return  # R3-04: a retry/reconfigure started after the guard decided; it is not idle any more
         if not self.cli.enabled:
             raise CreateRefused("请先在设置中重新登录此会话所属的 Google 账号，再停止它。")
         if row["state"] == "creating":
@@ -1161,6 +1219,7 @@ class Supervisor:
             await self._event(sid, "stop_pending", reason=reason)
             return
         await self._transition(sid, "stopping", stop_reason=reason)
+        self._queue_busy_floor.pop(sid, None)
         await self._cancel_driver(sid)
         await self._stop_flow(sid, foreign)
 
@@ -1228,6 +1287,7 @@ class Supervisor:
                                         "tunnel_slow", "endpoint_missing"})
         self._activity.pop(sid, None)
         self._queue_ok.pop(sid, None)
+        self._queue_busy_floor.pop(sid, None)
 
     # ---------------------------------------------------------------------------------------------- loops
     async def reconcile_once(self) -> None:
@@ -1291,15 +1351,21 @@ class Supervisor:
                      if rt.endpoint not in known and not (rt.name and rt.name in pending)}
         await self._record_externals(externals, self.now())
         for rt in externals.values():
+            stale = next((a for a in self.alerts.list() if a.key == f"external:{rt.endpoint}"), None)
+            if stale is not None and stale.target != rt.name:
+                self.alerts.clear(stale.key)  # R3-05: renamed or lost its name: no button for the old name
+            if not rt.name:  # R3-05: no by-name stop button for it; keepalive_externals_once warns instead
+                self.alerts.clear(f"external_autostop:{rt.endpoint}")
+                self.alerts.clear(f"external_keepalive:{rt.endpoint}")
             if rt.name:
                 self.alerts.raise_("external_runtime", f"运行时 {rt.name!r}（{rt.hardware}）正在计费，但不由 "
                                    "colabinet 管理，见外部运行时", key=f"external:{rt.endpoint}",
-                                   actions=["stop-external"], target=rt.name)
+                                   actions=["stop-external"], target=rt.name, endpoint=rt.endpoint)
             else:
                 self.alerts.raise_("unknown_runtime", f"一个未命名的运行时 {rt.endpoint}（{rt.hardware}）正在计费，"
                                    "见外部运行时；它没有本地名称，请在 Colab 网页中停止它", key=f"external:{rt.endpoint}")
         for alert in self.alerts.list():
-            if alert.key.startswith(("external:", "external_keepalive:", "external_autostop:")) and \
+            if alert.key.startswith(EXTERNAL_ALERT_PREFIXES) and \
                     alert.key.split(":", 1)[1] not in externals:
                 self.alerts.clear(alert.key)
         hidden = listing.usage.active_assignments - len(listing.runtimes) if listing.usage else 0
@@ -1325,30 +1391,50 @@ class Supervisor:
         rows = await self.store.live_sessions()
         for row in rows:
             sid = row["id"]
-            act = self._activity.get(sid)
             run = await self.store.current_run(sid)
             floor = None  # deferral: the idle clock counts from at least this time (never persisted)
             # engine_down too: busy no longer refreshes last_activity (R2-04), so one failed /system_stats round must
             # not idle-stop a render that is still running; a failed probe there gets the R1-01 grace only.
             if row["state"] in ("ready", "engine_down") and run and run["engine"] == "comfyui":
+                busy: bool | None = None  # None: the probe failed
                 try:
                     response = await self.http.get(f"http://127.0.0.1:{row['hidden_port']}/queue", timeout=5)
                     response.raise_for_status()
                     queue = response.json()
                     busy = bool(queue.get("queue_running") or queue.get("queue_pending"))
                     self._queue_ok[sid] = now
-                    if busy:
-                        # Deferring only (R2-04): the busy cap counts from the persisted real activity, which a busy
-                        # queue never refreshes, so neither a state flap nor a service restart restarts it. Past the
-                        # cap the normal idle countdown (with its warning) runs from real + QUEUE_BUSY_MAX_S.
-                        real = max(row["last_activity"] or row.get("ready_at") or 0.0, act.last if act else 0.0)
-                        floor = min(now, real + QUEUE_BUSY_MAX_S)
                 except (httpx.HTTPError, ValueError, AttributeError):
+                    pass
+                # R3-04: the probe can block for 5 s. A retry / reconfigure / stop clicked meanwhile changed the row:
+                # never act on the stale snapshot, look at this session again on the next tick. (live_sessions: a
+                # session that left the live states meanwhile is gone from it.)
+                fresh = next((r for r in await self.store.live_sessions() if r["id"] == sid), None)
+                fresh_run = await self.store.current_run(sid)
+                if fresh is None or fresh["state"] != row["state"] or \
+                        (fresh_run or {}).get("id") != (run or {}).get("id"):
+                    continue
+                row = fresh
+                act = self._activity.get(sid)
+                if busy:
+                    # Deferring only (R2-04): the busy cap counts from the persisted real activity, which a busy
+                    # queue never refreshes, so neither a state flap nor a service restart restarts it. Past the
+                    # cap the normal idle countdown (with its warning) runs from real + QUEUE_BUSY_MAX_S.
+                    real = max(row["last_activity"] or row.get("ready_at") or 0.0, act.last if act else 0.0)
+                    mark = min(now, real + QUEUE_BUSY_MAX_S)
+                    self._queue_busy_floor[sid] = max(self._queue_busy_floor.get(sid, 0.0), mark)
+                elif busy is None:
                     # Unknown queue is not proof of idleness, but only for a while (the tunnel may never come back).
                     # Deferring is never persisted as last_activity. Health recovery / budget guards still run.
                     since = max(self._queue_ok.get(sid, 0.0), row.get("ready_at") or 0.0)
                     if now - since <= QUEUE_GRACE_S:
                         floor = now
+            act = self._activity.get(sid)
+            # R3-01: the busy watermark also counts once the queue drained, so a render longer than idle_min gets the
+            # full idle_min (and its idle_warn) afterwards. It is in memory only: a restart loses it, and it never
+            # exceeds the persisted real activity + QUEUE_BUSY_MAX_S.
+            mark = self._queue_busy_floor.get(sid)
+            if mark is not None:
+                floor = mark if floor is None else max(floor, mark)
             last = act.effective(now) if act else (row["last_activity"] or 0.0)
             if floor is not None:
                 last = max(last, floor)

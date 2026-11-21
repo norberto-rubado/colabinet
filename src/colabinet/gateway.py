@@ -18,7 +18,6 @@ import hmac
 import json
 import logging
 import os
-import re
 import secrets
 import shlex
 import time
@@ -32,7 +31,7 @@ import httpx
 from .proxy import MAX_BODY_BYTES, MAX_UPLOAD_BYTES, BodyTooLarge, bad_path, read_body, wire_path  # noqa: F401 (bad_path re-exported)
 
 log = logging.getLogger("colabinet.gateway")
-UPLOAD_PATH = re.compile(r"/comfy/[^/]+/(?:api/)?upload/.*")
+COMFY_UPLOAD_PREFIXES = ("/upload/", "/api/upload/")  # upstream ComfyUI paths that get the 128 MiB upload limit
 
 GRACE_S = 20.0
 INTERVAL_S = 15.0
@@ -42,9 +41,11 @@ JSON_KEEPALIVE = b" "
 
 HOP_BY_HOP = {b"connection", b"keep-alive", b"proxy-authenticate", b"proxy-authorization", b"te", b"trailers",
               b"transfer-encoding", b"upgrade", b"host"}
-# Never forwarded: our own credential, the browser Origin (the session proxy rejects foreign origins), and
-# content-length (httpx sets it for the possibly rewritten body).
-DROP_REQUEST = HOP_BY_HOP | {b"authorization", b"x-api-key", b"origin", b"referer", b"content-length", b"cookie"}
+# Never forwarded: our own credential, the browser Origin (the session proxy rejects foreign origins),
+# content-length (httpx sets it for the possibly rewritten body), and MediaService's internal marker (R3-02: a public
+# client must not make its own POST /prompt activity-neutral, nor pose as MediaService).
+DROP_REQUEST = HOP_BY_HOP | {b"authorization", b"x-api-key", b"origin", b"referer", b"content-length", b"cookie",
+                             b"x-colabinet-media"}
 
 
 # --- key ---------------------------------------------------------------------------------------------------------
@@ -129,8 +130,37 @@ def text_targets(targets: list[Target]) -> list[Target]:
     return [t for t in targets if t.engine != "comfyui" and t.kind == "text"]
 
 
-def body_limit(path: str) -> int:
-    return MAX_UPLOAD_BYTES if UPLOAD_PATH.fullmatch(path) else MAX_BODY_BYTES
+class ComfyPathError(Exception):
+    """A /comfy/ request path that cannot be split into model and upstream path unambiguously (R3-03)."""
+
+
+def comfy_split(path: str, wire: str) -> tuple[str, str, str]:
+    """(model, decoded upstream path, raw upstream path) of a /comfy/{model}/{rest} request, split on the decoded
+    path and checked against the raw one, so what is validated (routing, '//', body limit) is what is forwarded.
+    The raw path must start with the literal '/comfy/' and the model segment must not contain an encoded '/': model
+    ids containing '/' are not supported on /comfy (R3-03)."""
+    parts = path.split("/", 3)  # ['', 'comfy', model, rest]
+    raw = wire.split("/", 3)
+    if not wire.startswith("/comfy/"):  # e.g. /comfy%2F<model>/...: the raw and decoded splits would disagree
+        raise ComfyPathError("invalid ComfyUI path: use /comfy/{model}/{path}")
+    if "%2f" in raw[2].lower():
+        raise ComfyPathError("invalid ComfyUI path: model ids containing '/' are not supported on /comfy; "
+                             "use the session name instead")
+    if len(raw) != len(parts) or unquote(raw[2]) != parts[2]:
+        raise ComfyPathError("invalid ComfyUI path: use /comfy/{model}/{path}")
+    model = parts[2]
+    upstream, raw_upstream = "/" + (parts[3] if len(parts) > 3 else ""), "/" + (raw[3] if len(raw) > 3 else "")
+    if not model or upstream.startswith("//") or raw_upstream.startswith("//") or unquote(raw_upstream) != upstream:
+        raise ComfyPathError("invalid ComfyUI path: use /comfy/{model}/{path}")
+    return model, upstream, raw_upstream
+
+
+def body_limit(comfy_upstream: str | None) -> int:
+    """128 MiB only for a validated /comfy/{model}/upload/... (or api/upload) upstream path, as split by
+    comfy_split(); 64 MiB for everything else (R3-03: the limit follows the path that is forwarded)."""
+    if comfy_upstream is not None and comfy_upstream.startswith(COMFY_UPLOAD_PREFIXES):
+        return MAX_UPLOAD_BYTES
+    return MAX_BODY_BYTES
 
 
 # --- ASGI helpers ------------------------------------------------------------------------------------------------
@@ -253,8 +283,14 @@ class Gateway:
             return await _send_json(send, 400, _error_body("invalid path", "invalid_request_error"))
         if path != "/v1" and not path.startswith(("/v1/", "/comfy/")):
             return await _send_json(send, 404, _error_body(f"no route {method} {path}", "not_found"))
+        comfy: tuple[str, str, str] | None = None
+        if path.startswith("/comfy/"):
+            try:
+                comfy = comfy_split(path, wire)
+            except ComfyPathError as exc:  # before the body: a shifted split must not borrow the upload limit
+                return await _send_json(send, 400, _error_body(str(exc), "invalid_request_error"))
         try:
-            body = await read_body(receive, body_limit(path), headers.get(b"content-length"))
+            body = await read_body(receive, body_limit(comfy[1] if comfy else None), headers.get(b"content-length"))
         except BodyTooLarge as e:
             return await _send_json(send, 413, _error_body(f"colabinet gateway: {e}", "request_too_large"))
         if body is None:
@@ -268,17 +304,12 @@ class Gateway:
 
         if path.startswith(("/v1/videos/", "/v1/files/")) or path in ("/v1/images/generations", "/v1/videos"):
             return await self.media_route(scope, receive, send, targets, body)
-        if path.startswith("/comfy/"):
-            parts = path.split("/", 3)
-            model, upstream_path = parts[2], "/" + (parts[3] if len(parts) > 3 else "")
+        if comfy is not None:
+            # Split once on the decoded path and checked against the raw one (comfy_split, R3-03).
+            model, upstream_path, wire_upstream = comfy
             target = next((t for t in targets if t.engine == "comfyui" and model in (t.model_id, t.name)), None)
             if target is None:
                 return await _send_json(send, 404, _error_body("ComfyUI session not found", "model_not_found"))
-            raw_parts = wire.split("/", 3)
-            wire_upstream = "/" + (raw_parts[3] if len(raw_parts) > 3 else "")
-            # The prefix is stripped on the raw path; an encoded '/' in the model segment would shift the split.
-            if upstream_path.startswith("//") or len(raw_parts) < 3 or unquote(raw_parts[2]) != model:
-                return await _send_json(send, 400, _error_body("invalid ComfyUI path", "invalid_request_error"))
             raw_scope = {**scope, "path": upstream_path, "comfy_raw": True}
             return await self.forward(raw_scope, receive, send, target, body, False, wire_upstream)
 

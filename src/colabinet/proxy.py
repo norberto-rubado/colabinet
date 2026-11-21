@@ -60,6 +60,10 @@ def origin_ok(headers: dict[bytes, bytes]) -> bool:
 
 MAX_BODY_BYTES = 64 * 1024 * 1024  # JSON / media requests (a 32 MiB base64 image is ~43 MB of JSON)
 POLL_CLIENT = "colabinet-poll"  # User-Agent of MediaService's /history, /queue, /models/loras polling
+# Set by MediaService on its requests (R3-02): recorded as usual, never counted as inference activity, because a
+# POST /prompt answered 200 only queued the job. The public gateway strips it (DROP_REQUEST), so only a local client
+# can send it, and this listener is loopback-only anyway.
+MEDIA_HEADER = b"x-colabinet-media"
 MAX_UPLOAD_BYTES = 128 * 1024 * 1024  # raw ComfyUI uploads
 
 
@@ -177,7 +181,9 @@ class SessionProxy:
             tap.rec.error_short = route.message[:200]
             return await self._record(tap.finish(self.now(), status), route.run_id)
 
-        inference = is_inference(method, path)
+        client = scope.get("client")
+        media = headers.get(MEDIA_HEADER) == b"1" and (client is None or client[0] in ("127.0.0.1", "::1"))
+        inference = is_inference(method, path) and not media
         key = next(self._ids)
         if inference:
             self.activity.begin(key, t0)
@@ -186,7 +192,7 @@ class SessionProxy:
         if route.inject_usage and method == "POST" and path.rstrip("/") in ("/v1/chat/completions", "/v1/completions"):
             body = with_usage_option(body)
         fwd_headers = [(k, v) for k, v in scope["headers"]
-                       if k.lower() not in HOP_BY_HOP and k.lower() != b"content-length"]
+                       if k.lower() not in HOP_BY_HOP and k.lower() not in (b"content-length", MEDIA_HEADER)]
         try:
             resp = await self.client.send(self.client.build_request(method, url, headers=fwd_headers, content=body),
                                           stream=True)

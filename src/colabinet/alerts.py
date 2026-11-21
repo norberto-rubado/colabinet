@@ -50,6 +50,7 @@ class Alert:
     session_id: int | None = None
     actions: list[str] = field(default_factory=list)
     target: str | None = None
+    endpoint: str | None = None  # external runtimes: the VM the target name meant, so a button cannot hit a successor
 
 
 class Alerts:
@@ -60,14 +61,14 @@ class Alerts:
         self._alerts: dict[str, Alert] = {}
 
     def raise_(self, kind: str, message: str, session_id: int | None = None, key: str | None = None,
-               actions: list[str] | None = None, target: str | None = None) -> Alert:
+               actions: list[str] | None = None, target: str | None = None, endpoint: str | None = None) -> Alert:
         key = key or (f"{kind}:{session_id}" if session_id is not None else kind)
         level = "critical" if kind in CRITICAL_KINDS else "warning"
         existing = self._alerts.get(key)
         if existing:
             existing.message = message
             return existing
-        alert = Alert(key, kind, level, message, self.now(), session_id, actions or [], target)
+        alert = Alert(key, kind, level, message, self.now(), session_id, actions or [], target, endpoint)
         self._alerts[key] = alert
         log.warning("ALERT %s: %s", kind, message)
         if level == "critical" and self.notify_enabled:

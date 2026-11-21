@@ -30,6 +30,13 @@ MAX_OUTPUT_BYTES = 512 * 1024 * 1024
 # playground jobs are tests (is_playground), and internal status polling is excluded from the stats entirely.
 USER_AGENTS = {"gateway": "colabinet-gateway", "playground": "colabinet-playground"}
 POLL_UA = "colabinet-poll"
+# Marks every MediaService request to the session proxy (R3-02): the proxy still records it, but a POST /prompt
+# answered 200 is only a queued job, not delivered work. Activity is up to the job (images()/_video()) alone.
+MEDIA_HEADER = "x-colabinet-media"
+
+
+def media_headers(ua):
+    return {"User-Agent": ua, MEDIA_HEADER: "1"}
 
 
 class MediaError(Exception):
@@ -187,7 +194,7 @@ class MediaService:
     async def request(self, target, method, path, ua=USER_AGENTS["gateway"], **kwargs):
         try:
             response = await self.client.request(method, f"http://127.0.0.1:{target.port}{path}",
-                                                 timeout=60, headers={"User-Agent": ua}, **kwargs)
+                                                 timeout=60, headers=media_headers(ua), **kwargs)
             response.raise_for_status()
             if path != "/view":
                 try:
@@ -271,7 +278,7 @@ class MediaService:
     async def _fetch_once(self, target, ref, ua):
         # Stream into a bounded buffer, never allow an arbitrary /view response to exhaust host RAM.
         url = f"http://127.0.0.1:{target.port}/view"
-        async with self.client.stream("GET", url, params=ref, timeout=120, headers={"User-Agent": ua}) as response:
+        async with self.client.stream("GET", url, params=ref, timeout=120, headers=media_headers(ua)) as response:
             response.raise_for_status()
             data = bytearray()
             async for chunk in response.aiter_bytes():

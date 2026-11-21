@@ -298,14 +298,19 @@ async def test_auto_stop_after_n_minutes_goes_through_stop_external(sup, store, 
     assert [e["name"] for e in await sup.externals()] == [None]
 
 
-async def test_auto_stop_refuses_a_recreated_runtime_with_the_same_name(sup, cli, clock):
+async def test_auto_stop_refuses_a_recreated_runtime_with_the_same_name(sup, cli, clock, store):
     await sup.reconcile_once()
     await sup.external_keepalive("gpu-g4-s-1", True, 1)
     cli.runtimes = [g4(endpoint="gpu-g4-s-77"), *cli.runtimes[1:]]  # same name, another VM, not yet reconciled
     clock.advance(120)
     await sup.keepalive_externals_once()
     assert cli.stops == []
-    assert any(a.key == "external_autostop:gpu-g4-s-1" for a in sup.alerts.list())  # own key since R2-03
+    # R3-05: the timer's own VM is no longer listed, so its job is done: no CRITICAL "auto-stop failed" alert
+    # (R2-03's external_autostop is for a VM that keeps billing), keepalive off, recorded as already_gone.
+    assert not any(a.key == "external_autostop:gpu-g4-s-1" for a in sup.alerts.list())
+    assert not (await store.external("gpu-g4-s-1"))["keepalive"]
+    stopped = await events(store, "external_stopped")
+    assert len(stopped) == 1 and '"reason": "already_gone"' in stopped[0]["detail_json"]
 
 
 async def test_heartbeat_uses_the_cli_exec_helper(tmp_path):

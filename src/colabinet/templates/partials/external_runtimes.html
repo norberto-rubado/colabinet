@@ -37,6 +37,11 @@
                   hx-confirm="要停止外部运行时 {{ rt.name }}（{{ rt.hardware }}）吗？它不由 colabinet 创建，VM 上的数据（/content）会全部丢失。"
                   hx-target="#ext-runtimes" hx-swap="cb-patch">{{ icon('stop') }}停止</button>
         {% else %}
+          {% if rt.keepalive_unnamed %}
+          <button class="btn" data-cb-key="keepalive-off" data-size="sm" data-variant="outline" hx-post="/ui/actions/external-keepalive"
+                  hx-vals='{{ {"endpoint": rt.endpoint, "enabled": "0", "account_id": ext.account_id} | tojson | forceescape }}'
+                  hx-target="#ext-runtimes" hx-swap="cb-patch" title="它已没有本地名称，colabinet 无法再为它执行心跳或自动停止">取消接管保活</button>
+          {% endif %}
           <span class="cb-muted" title="没有本地名称的运行时无法通过 CLI 按名称操作">请在 Colab 网页中停止</span>
         {% endif %}
         </div>

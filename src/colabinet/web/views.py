@@ -77,7 +77,8 @@ async def session_rows(sup: Supervisor, where: str, params: tuple = (), limit: i
         idle_left = None
         if row["state"] in ("tunnelling", "ready", "engine_down") and row["idle_min"]:
             act = sup._activity.get(row["id"])
-            last = max(act.effective(now) if act else 0.0, row["last_activity"] or 0.0)
+            last = max(act.effective(now) if act else 0.0, row["last_activity"] or 0.0,
+                       sup._queue_busy_floor.get(row["id"], 0.0))  # R3-01: a busy/just drained ComfyUI queue
             idle_left = max(0, round(row["idle_min"] * 60 - (now - last)))
         out.append({
             **row, "account_email": accounts.get(row["account_id"], "共享 CLI 账号"),
