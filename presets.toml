@@ -577,3 +577,65 @@ prewarm = ["DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf"]
 ctx = 131072
 kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24"]
+
+
+# ComfyUI native nodes; HF file sizes checked 2026-11-21. Download size is not simultaneous VRAM use.
+[engines.comfyui]
+release = "afcb984e76fe9f870bf7746cf394766e1f690563" # ComfyUI master 2026-11-21 (native MiniMax H3, MOSS, Krea2, Anima, SeedVR2)
+
+[[preset]]
+id = "comfy-image-uncensored"
+engine = "comfyui"
+kind = "image"
+label = "无审查生图套件（MOSS / Krea 2 Kroma / H3-Image / Anima / WAI / SeedVR2 放大）"
+repo = "Comfy-Org/MOSS-Image"
+alias = "comfy-image-uncensored"
+licence = "各模型许可证见对应仓库"
+files = [
+  {repo = "Comfy-Org/MOSS-Image", file = "diffusion_models/moss_image_sft_int8_convrot.safetensors", dir = "diffusion_models", size_gb = 5.413698958},
+  {repo = "Comfy-Org/MOSS-Image", file = "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors", dir = "text_encoders", size_gb = 7.343591088},
+  {repo = "Comfy-Org/MOSS-Image", file = "vae/flux2-vae_small.safetensors", dir = "vae", size_gb = 0.249521340},
+  {repo = "Comfy-Org/MOSS-Image", file = "loras/moss_image_edit_lora_rank_64_bf16.safetensors", dir = "loras", size_gb = 0.297382216},
+  {repo = "lodestones/Kroma", file = "kroma-v0.3.1-turbo-opd.safetensors", dir = "diffusion_models", size_gb = 26.283332880},
+  {repo = "Comfy-Org/Krea-2", file = "diffusion_models/krea2_turbo_int8_convrot.safetensors", dir = "diffusion_models", size_gb = 13.492686496},
+  {repo = "Comfy-Org/Krea-2", file = "text_encoders/qwen3vl_4b_bf16.safetensors", dir = "text_encoders", size_gb = 8.875719384},
+  {repo = "Comfy-Org/Krea-2", file = "vae/qwen_image_vae.safetensors", dir = "vae", size_gb = 0.253806246},
+  {repo = "Comfy-Org/MiniMax-H3-Image", file = "diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors", dir = "diffusion_models", size_gb = 20.979314802},
+  {repo = "Comfy-Org/MiniMax-H3-Image", file = "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors", dir = "text_encoders", size_gb = 27.141342152},
+  {repo = "Comfy-Org/MiniMax-H3-Image", file = "vae/minimax_h3_image_vae_fp16.safetensors", dir = "vae", size_gb = 1.168505312},
+  {repo = "circlestone-labs/Anima", file = "split_files/diffusion_models/anima-turbo-v1.1.safetensors", dir = "diffusion_models", size_gb = 4.182230656},
+  {repo = "circlestone-labs/Anima", file = "split_files/text_encoders/qwen_3_06b_base.safetensors", dir = "text_encoders", size_gb = 1.192135096},
+  {repo = "LyliaEngine/waiIllustriousSDXL_v170", file = "waiIllustriousSDXL_v170.safetensors", dir = "checkpoints", size_gb = 6.938040682},
+  {repo = "Comfy-Org/SeedVR2", file = "diffusion_models/seedvr2_7b_sharp_int8_convrot.safetensors", dir = "diffusion_models", size_gb = 8.334897976},
+  {repo = "Comfy-Org/SeedVR2", file = "vae/seedvr2_ema_vae_fp16.safetensors", dir = "vae", size_gb = 0.501324814},
+]
+[preset.gpu.G4]
+ctx = 32768
+[preset.measured]
+G4 = { seconds_per_output = 5.0, unit = "image", date = "2026-11-21", note = "G4 热启动：1024² Anima 1.06、WAI 2.12、Krea2 Turbo 2.39、Kroma 3.97、MOSS 5.0 秒/张；H3 2048² 2.9、4096² 15.0 秒；H3 编辑 1.86 秒；SeedVR2 ×2 1.59 秒。首次载入较慢。" }
+
+[[preset]]
+id = "comfy-video-h3"
+engine = "comfyui"
+kind = "video"
+label = "MiniMax H3 视频（有声，图生/文生视频，Turbo 8 步 + NSFW LoRA）"
+repo = "Comfy-Org/MiniMax-H3"
+alias = "comfy-video-h3"
+licence = "各模型许可证见对应仓库"
+files = [
+  {repo = "Comfy-Org/MiniMax-H3", file = "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors", dir = "diffusion_models", size_gb = 20.970379616},
+  {repo = "Comfy-Org/MiniMax-H3", file = "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", dir = "text_encoders", size_gb = 15.687142551},
+  {repo = "Comfy-Org/MiniMax-H3", file = "vae/minimax_h3_video_vae_int8_convrot.safetensors", dir = "vae", size_gb = 2.811065184},
+  {repo = "Comfy-Org/MiniMax-H3", file = "vae/minimax_h3_audio_vae_fp32.safetensors", dir = "vae", size_gb = 0.605254808},
+  {repo = "Comfy-Org/MiniMax-H3", file = "loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors", dir = "loras", size_gb = 1.956193000},
+  {repo = "Hearmeman/minimax-h3-loras", file = "HMNSFW-AIO-V2.5.safetensors", dir = "loras", size_gb = 0.086040232},
+  {repo = "Hearmeman/minimax-h3-loras", file = "HMNSFW_AIO_V2.safetensors", dir = "loras", size_gb = 0.310168344},
+  {repo = "Hearmeman/minimax-h3-loras", file = "hmpussy_v6_epoch30.safetensors", dir = "loras", size_gb = 0.626294968},
+  {repo = "Hearmeman/minimax-h3-loras", file = "HMPenis_v2_e35.safetensors", dir = "loras", size_gb = 0.310168344},
+  {repo = "Hearmeman/minimax-h3-loras", file = "HMBreastsV2.safetensors", dir = "loras", size_gb = 0.077580016},
+  {repo = "Hearmeman/minimax-h3-loras", file = "HMCumshot_V2.safetensors", dir = "loras", size_gb = 0.626294968},
+]
+[preset.gpu.G4]
+ctx = 32768
+[preset.measured]
+G4 = { seconds_per_output = 80.0, unit = "video", date = "2026-11-21", note = "第三方 crhywun/h3-shortdrama 测量，尚待本机复测：G4，5 秒 768×1344 有声视频，Turbo 8 步约 80 秒，VRAM 约 39 GB。" }

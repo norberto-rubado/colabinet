@@ -14,7 +14,7 @@ import signal
 import statistics
 from collections import deque
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -36,6 +36,9 @@ from .proxy import ProxyManager, Route, SessionProxy
 from .stats import RequestRecord
 from .store import LIVE_STATES, Store
 from .tunnel import SshTunnels, Tunnels, cmdline
+
+if TYPE_CHECKING:
+    from .media import MediaService
 
 log = logging.getLogger("colabinet.supervisor")
 
@@ -127,6 +130,7 @@ class Supervisor:
         self._new: dict[int, asyncio.Task] = {}  # sid -> task awaiting `colab new` (rc, output)
         self._new_pids: dict[int, int] = {}
         self._activity: dict[int, Activity] = {}
+        self._media: MediaService | None = None
         self._view: dict[int, dict[str, Any]] = {}  # synchronous snapshot for the proxy's route()
         self._wake: dict[int, asyncio.Event] = {}
         self._health_probe_pending: set[int] = set()
@@ -337,6 +341,8 @@ class Supervisor:
             raise CreateRefused(f"自定义 {req.engine} 模型需要 Hugging Face 仓库和 GGUF 文件")
         if req.engine == "exllamav3" and not (req.repo and req.revision):
             raise CreateRefused("自定义 ExLlamaV3 模型需要 Hugging Face 仓库和 revision（例如 4.00bpw）")
+        if req.engine == "comfyui":
+            raise CreateRefused("ComfyUI 请使用含 files 清单的预设")
         pins = {} if isinstance(self.presets, PresetError) else self.presets.engines.get(req.engine, {})
         release = pins.get("release") or (f"{pins['wheel']}@{pins['tabbyapi_commit']}"
                                            if pins.get("wheel") and pins.get("tabbyapi_commit") else None)
@@ -361,6 +367,13 @@ class Supervisor:
             raise CreateRefused("refusal_projection 必须是布尔值")
         if spec.engine == "exllamav3" and gpu_class == "CPU":
             raise CreateRefused("ExLlamaV3 需要 GPU 运行时")
+        if spec.engine == "comfyui":
+            if gpu_class != "G4":
+                raise CreateRefused("ComfyUI 媒体预设目前只支持 G4；其他 GPU 尚未验证")
+            try:
+                getattr(self.engines["comfyui"], "validate_spec")(spec)
+            except ValueError as exc:
+                raise CreateRefused(str(exc)) from exc
         if spec.engine != "strata":
             if spec.refusal_projection:
                 raise CreateRefused("只有 Strata 支持实验性拒答投影")
@@ -813,10 +826,12 @@ class Supervisor:
 
     async def _healthy(self, row: dict[str, Any]) -> bool:
         try:
-            r = await self.http.get(f"http://127.0.0.1:{row['hidden_port']}/health", timeout=5)
+            run = await self.store.current_run(row["id"])
+            engine = self.engines.get((run or {}).get("engine", ""))
+            health_path = getattr(engine, "health_path", "/health")
+            r = await self.http.get(f"http://127.0.0.1:{row['hidden_port']}{health_path}", timeout=5)
             if r.status_code != 200:
                 return False
-            run = await self.store.current_run(row["id"])
             if run and run["engine"] == "strata":
                 # The Python frontend stays healthy after Strata's native engine dies; only loaded models count.
                 if r.json().get("loaded") is False:
@@ -1274,6 +1289,19 @@ class Supervisor:
         for row in rows:
             sid = row["id"]
             act = self._activity.get(sid)
+            run = await self.store.current_run(sid)
+            if row["state"] == "ready" and run and run["engine"] == "comfyui":
+                try:
+                    response = await self.http.get(f"http://127.0.0.1:{row['hidden_port']}/queue", timeout=5)
+                    response.raise_for_status()
+                    queue = response.json()
+                    if queue.get("queue_running") or queue.get("queue_pending"):
+                        act = self._activity.setdefault(sid, Activity())
+                        act.reset(now)
+                except (httpx.HTTPError, ValueError):
+                    # Unknown queue is not proof of idleness. Health recovery / budget guards still run.
+                    act = self._activity.setdefault(sid, Activity())
+                    act.reset(now)
             last = act.effective(now) if act else (row["last_activity"] or 0.0)
             d = evaluate(row, now, last, self.s.grace_s)
             if d.action == "stop":
@@ -1356,6 +1384,8 @@ class Supervisor:
         ]
 
     async def shutdown(self, stop_all: bool = False) -> list[str]:
+        if self._media is not None:
+            await self._media.close()
         for t in self._loops:
             t.cancel()
         await asyncio.gather(*self._loops, return_exceptions=True)

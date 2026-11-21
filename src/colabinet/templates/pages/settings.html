@@ -47,6 +47,25 @@
     <div class="cb-row"><strong>示例</strong>{% if gateway.key %}<button class="btn cb-right" data-size="sm" data-variant="outline" aria-label="复制 curl 示例" onclick="cbCopy(document.getElementById('gw-curl-full').textContent, '已复制 curl 示例')">{{ icon('copy') }}复制 curl</button>{% endif %}</div>
     <pre><code id="gw-curl">{{ gateway.curl }}</code></pre>
     <pre id="gw-curl-full" hidden>{{ gateway.curl_full }}</pre>
+    <details><summary>生图、生视频与原始 ComfyUI API</summary>
+      <p>使用同一密钥，model 填媒体预设别名或会话名。图片结果默认 base64；url 文件也必须携带认证，保存 24 小时。</p>
+      <pre><code>curl {{ gateway.base }}/images/generations \
+  -H 'Authorization: Bearer ***' -H 'Content-Type: application/json' \
+  -d '{"model":"comfy-image-uncensored","prompt":"夕阳下的山间小屋","workflow":"moss","size":"1024x1024","n":1,"response_format":"b64_json"}'
+
+curl {{ gateway.base }}/videos \
+  -H 'Authorization: Bearer ***' -H 'Content-Type: application/json' \
+  -d '{"model":"comfy-video-h3","prompt":"A mountain stream, flowing water, birds singing. No cuts.","seconds":5,"size":"768x1344","steps":8,"loras":[]}'
+# 返回 {"id":"video_...","status":"queued"}，之后轮询：
+curl {{ gateway.base }}/videos/VIDEO_ID -H 'Authorization: Bearer ***'
+curl {{ gateway.base }}/videos/VIDEO_ID/content -H 'Authorization: Bearer ***' -o video.mp4
+
+curl {{ gateway.base | replace('/v1', '') }}/comfy/comfy-image-uncensored/object_info \
+  -H 'Authorization: Bearer ***'</code></pre>
+      <p>生图工作流：moss、kroma、krea2turbo、h3、anima、wai；编辑用 h3edit 加 image（base64 或 data URL）；upscale: true 启用 SeedVR2 ×2。可选 negative_prompt、seed、steps，n 为 1–8。</p>
+      <p>视频：image 可选（首帧），seconds 为 4–15（默认 5），帧数按 24 fps 向上取到 17k+5；默认 Turbo 8 步。loras: [{"name":"文件名.safetensors","strength":1.0}] 必须已存在于 VM；默认不加载额外 LoRA。任务状态为 queued、in_progress、completed、failed，progress 为队列阶段估计值，不是采样百分比。</p>
+      <p>原始通道：任意方法 /comfy/{model}/{path}，包括 prompt、history、view、upload/image、object_info。ComfyUI 只监听 VM 的 127.0.0.1，不暴露无认证端口。</p>
+    </details>
   {% else %}
     <p><span class="badge" data-tone="neutral">已关闭</span> 使用 <code>--gateway-port 端口</code> 启动 colabinet 即可开启（0 表示关闭）。</p>
   {% endif %}</section>

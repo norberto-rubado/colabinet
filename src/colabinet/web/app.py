@@ -6,21 +6,26 @@ by the API middleware); results come back as toasts via the HX-Trigger header, e
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
 import time
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 
 from ..api import parse_deadline
+from ..comfy_graphs import ImageRequest, VideoRequest
 from ..config import GPU_CLASSES, PACKAGE_DIR, VRAM_GB
 from ..diagnostics import redact_diagnostic
 from ..fit import hf_file_gb
+from ..gateway import ready_targets
 from ..gateway import ui_context as gateway_context
+from ..media import MediaError, media_service
 from ..metrics import CHARTS, GROUPS, MEASURES, TIME_PRESETS, QueryError, QuerySpec, to_csv
 from ..presets import PresetError
 from ..supervisor import CreateRefused, CreateRequest, Supervisor
@@ -133,6 +138,7 @@ def spec_from_form(form) -> dict[str, Any]:
 
 def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
     templates = make_templates()
+    app.state.media_supervisor = sup
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     router = APIRouter()
     http = sup.http
@@ -196,7 +202,12 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
     @router.get("/playground", response_class=HTMLResponse)
     async def playground(request: Request, session: int | None = None):
         live = [statement for statement in await views.session_rows(sup, "state = 'ready'")]
-        return await page(request, "pages/playground.html", "playground", sessions=live, selected=session)
+        media = [row for row in live if (row["run"] or {}).get("engine") == "comfyui"]
+        chat = [row for row in live if (row["run"] or {}).get("engine") != "comfyui"]
+        for row in media:
+            row["media_kind"] = json.loads(row["run"]["spec_json"]).get("kind", "image")
+        return await page(request, "pages/playground.html", "playground", sessions=chat, media_sessions=media,
+                          selected=session)
 
     @router.get("/metrics", response_class=HTMLResponse)
     async def metrics(request: Request, saved: int | None = None):
@@ -615,6 +626,65 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         menu = partial(request, "partials/cmdk.html", base=await views.base_context(sup), oob=True)
         return toast(menu, "success", "设置已保存")
 
+
+    @router.post("/ui/media/{kind}")
+    async def media_generate(request: Request, kind: str):
+        try:
+            raw = dict(await request.json())
+            sid = raw.pop("session_id", None)
+            target = next((t for t in await ready_targets(sup.store) if t.sid == sid
+                           and t.engine == "comfyui" and t.kind == kind), None)
+            if target is None:
+                raise MediaError("请选择对应类型的已就绪 ComfyUI 会话", 409)
+            raw["model"] = target.model_id
+            service = media_service(sup)
+            if kind == "image":
+                raw["response_format"] = "b64_json"
+                body = ImageRequest.model_validate(raw)
+                task = service.spawn(service.images(target, body))
+
+                async def stream_image():
+                    # The console can also sit behind Cloudflare; valid JSON whitespace keeps cold loads alive.
+                    while not task.done():
+                        done, _ = await asyncio.wait({task}, timeout=15)
+                        if not done:
+                            yield b" "
+                    try:
+                        yield json.dumps(task.result()).encode()
+                    except (MediaError, ValueError, KeyError) as exc:
+                        yield json.dumps({"error": str(exc)}).encode()
+
+                return StreamingResponse(stream_image(), media_type="application/json",
+                                         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+            elif kind == "video":
+                result = await service.create_video(target, VideoRequest.model_validate(raw))
+            else:
+                raise MediaError("未知媒体类型", 404)
+            return JSONResponse(result)
+        except ValidationError as exc:
+            detail = exc.errors(include_input=False, include_url=False)
+            return JSONResponse({"error": "媒体请求无效：" + json.dumps(detail, ensure_ascii=False, default=str)}, 400)
+        except (ValueError, TypeError):
+            return JSONResponse({"error": "媒体请求必须是有效的 JSON 对象"}, 400)
+        except MediaError as exc:
+            return JSONResponse({"error": str(exc)}, exc.status)
+
+    @router.get("/ui/media/videos/{ident}")
+    async def media_status(ident: str):
+        try:
+            return media_service(sup).video_status(ident)
+        except MediaError as exc:
+            return JSONResponse({"error": str(exc)}, exc.status)
+
+    @router.get("/ui/media/videos/{ident}/content")
+    async def media_content(ident: str):
+        try:
+            if not ident.startswith("video_"):
+                raise MediaError("未找到视频", 404)
+            file, ctype = media_service(sup).files.content(ident)
+            return FileResponse(file, media_type=ctype, headers={"Cache-Control": "private, no-store"})
+        except MediaError as exc:
+            return JSONResponse({"error": str(exc)}, exc.status)
 
     @router.post("/ui/playground/send")
     async def playground_send(request: Request):

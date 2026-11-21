@@ -301,6 +301,18 @@ def gpu_fit(engine: str, gpu: str, preset: Preset | None, weights_gb: float | No
 
     status is "blocked" when the runtime cannot run the model at all (shown as a destructive badge), "ok" when it
     fits, and "warn" for everything that runs with a caveat, such as llama.cpp offloading layers to the CPU."""
+    if engine == "comfyui":
+        from ..comfy_files import disk_gb
+        disk = disk_gb(preset.files) if preset else None
+        supported = gpu == "G4"
+        message = (f"模型下载约 {disk:.1f} GB（文件大小之和，另留安装和输出空间）；" if disk else "下载大小未知；")
+        message += "ComfyUI 动态换入模型，下载大小不等于显存占用。"
+        message += "仅 G4 96 GB 已支持；其他 GPU 尚未验证。"
+        return {"gpu": gpu, "verdict": "fits" if supported else "unknown", "ctx": ctx, "kv": kv,
+                "kv_gb": None, "disk_gb": disk, "status": "ok" if supported else "blocked",
+                "label": "G4 媒体生成" if supported else "暂不支持（未验证）",
+                "variant": "secondary" if supported else "destructive", "message": message,
+                "measured": measured_speed(preset.measured.get(gpu) if preset else None)}
     fit = estimate(gpu, weights_gb, ctx, kv, kv_bytes_per_token,
                    overhead_gb=EXL3_OVERHEAD_GB if engine == "exllamav3" else OVERHEAD_GB)
     shown = fit_presentation(engine, fit, preset, gpu, strata_quant)
@@ -332,15 +344,22 @@ def tps(value: float) -> str:
     return f"{value:,.1f}" if value >= 10 or value == round(value, 1) else f"{value:.2g}"
 
 
-def measured_speed(speed: Measured | None) -> dict[str, str] | None:
+def measured_speed(speed: Measured | None) -> dict[str, Any] | None:
     """A preset's measured speed on one class, as display text: shown on the GPU choices, the review and Models."""
     if speed is None:
+        return None
+    if speed.seconds_per_output is not None:
+        gen = f"{speed.seconds_per_output:g}"
+        unit = "秒/视频" if speed.unit == "video" else "秒/张"
+        return {"gen": gen, "prefill": None, "date": speed.date, "note": speed.note,
+                "unit": unit, "detail": f"{gen} {unit}（{speed.note}）"}
+    if speed.gen_tps is None:
         return None
     prefill = f"{speed.prefill_tps:,.0f}" if speed.prefill_tps else None
     detail = f"生成 {tps(speed.gen_tps)} tok/s" + (f"，4K token 提示词预填充 {prefill} tok/s"
                                                    if prefill else "")
     return {"gen": tps(speed.gen_tps), "prefill": prefill, "date": speed.date, "note": speed.note,
-            "detail": detail + (f"（{speed.note}）" if speed.note else "")}
+            "detail": detail + (f"（{speed.note}）" if speed.note else ""), "unit": "tok/s"}
 
 
 def fit_matrix(preset, host_ram: dict[str, float] | None = None) -> list[dict[str, Any]]:

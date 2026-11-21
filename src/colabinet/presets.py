@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-KNOWN_ENGINES = {"llamacpp", "exllamav3", "strata"}
+KNOWN_ENGINES = {"llamacpp", "exllamav3", "strata", "comfyui"}
 FALLBACK_CLASS = {"A100-80": "A100", "T4-HIGHMEM": "T4"}
 
 
@@ -67,10 +68,12 @@ class GpuEvidence:
 @dataclass(frozen=True)
 class Measured:
     """Speeds measured on a real runtime of one GPU class at the preset's defaults, engine-reported."""
-    gen_tps: float  # generation, on a short prompt
+    gen_tps: float | None = None  # LLM generation only; media uses seconds_per_output
     prefill_tps: float | None = None  # prompt processing on a ~4K-token prompt; None when too slow to try
     date: str = ""
     note: str = ""
+    seconds_per_output: float | None = None
+    unit: str = ""
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,9 @@ class Preset:
     release: str | None = None  # llama.cpp release tag for this preset only, overrides engines.llamacpp.release
     links: dict[str, str] = field(default_factory=dict)  # name llama.cpp expects -> real file in the same repo
     prewarm: tuple[str, ...] = ()  # files read into the VM page cache after the server is healthy
+
+    files: tuple[dict, ...] = ()  # ComfyUI {repo, file, dir, size_gb?}
+    kind: str = "text"  # text | image | video
 
     def defaults_for(self, gpu_class: str) -> GpuDefaults:
         generic = GpuDefaults(kv={"exllamav3": "FP16", "strata": "int8"}.get(self.engine, "f16"))
@@ -135,9 +141,21 @@ def load_presets(path: Path) -> Presets:
         if raw.get("refusal_projection") and raw["engine"] != "strata":
             raise PresetError(f"{where}：只有 Strata 支持 refusal_projection")
         _llamacpp_fields(where, raw)
+        if raw["engine"] == "comfyui":
+            from .comfy_files import validate_files
+            try:
+                validate_files(raw.get("files"))
+                if raw.get("kind") not in ("image", "video"):
+                    raise ValueError("ComfyUI kind 必须为 image 或 video")
+            except ValueError as e:
+                raise PresetError(f"{where}：{e}") from e
+        elif "files" in raw or raw.get("kind", "text") != "text":
+            raise PresetError(f"{where}：files 和媒体 kind 只用于 ComfyUI")
         if raw["id"] in presets:
             raise PresetError(f"{where}：id {raw['id']!r} 重复")
         fields = {k: v for k, v in raw.items() if k not in ("gpu", "evidence", "measured")}
+        if "files" in fields:
+            fields["files"] = tuple(dict(f) for f in fields["files"])
         if "links" in fields:
             fields["links"] = dict(fields["links"])
         if "prewarm" in fields:
@@ -154,9 +172,14 @@ def load_presets(path: Path) -> Presets:
                 raise ValueError("evidence status 必须是 tested、reported 或 build_only")
             measured = {k: Measured(**v) for k, v in raw.get("measured", {}).items()}
             for name, speed in measured.items():
-                if not all(isinstance(value, (int, float)) and value > 0
-                           for value in (speed.gen_tps, speed.prefill_tps) if value is not None):
+                if not all(type(value) in (int, float) and math.isfinite(value) and value > 0
+                           for value in (speed.gen_tps, speed.prefill_tps, speed.seconds_per_output)
+                           if value is not None):
                     raise ValueError(f"measured.{name}：gen_tps 和 prefill_tps 必须是正数")
+                if raw["engine"] == "comfyui" and (speed.seconds_per_output is None or speed.unit != raw["kind"]):
+                    raise ValueError(f"measured.{name}：媒体测量需要 seconds_per_output 和匹配的 unit")
+                if raw["engine"] != "comfyui" and speed.gen_tps is None:
+                    raise ValueError(f"measured.{name}：LLM 测量需要 gen_tps")
             presets[raw["id"]] = Preset(**fields, gpu=gpu, evidence=evidence, measured=measured)
         except (TypeError, ValueError) as e:
             raise PresetError(f"{where}：{e}") from e

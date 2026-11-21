@@ -35,10 +35,14 @@ class RunSpec:
     links: dict[str, str] = field(default_factory=dict)  # llama.cpp: expected file name -> real file in the repo
     prewarm: tuple[str, ...] = field(default_factory=tuple)  # llama.cpp: files read into page cache when ready
 
+    files: tuple[dict, ...] = ()
+    kind: str = "text"
+
     def __post_init__(self) -> None:
         # spec_json stores tuples as lists, and rows written before a field existed lack it: normalise both.
         object.__setattr__(self, "extra_args", tuple(self.extra_args or ()))
         object.__setattr__(self, "links", dict(self.links or {}))
+        object.__setattr__(self, "files", tuple(dict(f) for f in self.files or ()))
         object.__setattr__(self, "prewarm", tuple(self.prewarm or ()))
 
     @classmethod
@@ -52,7 +56,7 @@ class RunSpec:
                    template=preset.template, preset_id=preset.id, release=release, revision=preset.revision,
                    vision=preset.vision, vision_offload=preset.vision_offload,
                    refusal_projection=preset.refusal_projection, extra_args=d.extra_args,
-                   links=dict(preset.links), prewarm=tuple(preset.prewarm))
+                   links=dict(preset.links), prewarm=tuple(preset.prewarm), files=preset.files, kind=preset.kind)
         clean = {k: v for k, v in overrides.items() if v is not None}
         return cls(**{**spec.__dict__, **clean})
 

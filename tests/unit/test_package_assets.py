@@ -30,7 +30,10 @@ def test_source_distribution_excludes_runtime_data(wheel):
 
 def test_wheel_contains_console_assets(wheel):
     paths = ["templates/base.html", "templates/macros.html", "chat_templates/qwen38_effort_map.jinja",
-             "static/app.css", "static/app.js", "presets.toml"]
+             "static/app.css", "static/app.js", "static/media.js", "presets.toml",
+             "templates/partials/media_playground.html", "vm/setup_comfyui.py", "comfy_files.py"]
+    paths += [f"workflows/{name}.json" for name in
+              ("moss", "kroma", "krea2turbo", "h3", "h3edit", "anima", "wai", "seedvr", "video")]
     paths += [f"templates/pages/{page}.html" for page in
               ("overview", "sessions", "session", "new", "playground", "metrics", "models", "settings")]
     paths += [f"static/vendor/{asset}" for asset in

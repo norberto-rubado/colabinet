@@ -65,6 +65,8 @@ async def send_playground(sup, raw):
     if not row or row["state"] != "ready":
         raise CreateRefused("请选择一个已就绪的会话")
     run = await sup.store.current_run(row["id"])
+    if run.get("engine") == "comfyui":
+        raise CreateRefused("ComfyUI 请使用生图或生视频页签")
     payload = {"model": run["alias"], "stream": body.stream, "max_tokens": body.max_tokens,
                "messages": [{"role": "user", "content": body.prompt}],
                "chat_template_kwargs": {"enable_thinking": body.thinking != "none"}}

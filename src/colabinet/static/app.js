@@ -186,7 +186,7 @@
       card.title = fit.message;
       card.querySelector('.cb-gpu-fit').textContent = fit.label;
       const speed = card.querySelector('.cb-gpu-speed');
-      if (speed) speed.textContent = fit.measured ? `${fit.measured.gen} tok/s（实测）` : '';
+      if (speed) speed.textContent = fit.measured ? `${fit.measured.gen} ${fit.measured.unit || 'tok/s'}（实测）` : '';
       input.disabled = fit.status === 'blocked' && !input.checked;
     });
     const note = document.getElementById('gpu-note');
@@ -313,7 +313,12 @@
     document.getElementById('ctx').placeholder = custom && engine === 'strata'
       ? (qwen36 ? '8192' : '131072') : '预设默认值';
     document.getElementById('parallel').placeholder = engine === 'strata' ? '1（FIFO，单序列）' : '预设默认值';
-    document.getElementById('kv').disabled = qwen36;
+    for (const id of ['ctx', 'parallel', 'kv', 'extra_args']) {
+      const control = document.getElementById(id);
+      control.closest('.field').hidden = engine === 'comfyui';
+      control.disabled = engine === 'comfyui';
+    }
+    document.getElementById('kv').disabled = qwen36 || engine === 'comfyui';
     document.getElementById('kv').placeholder = qwen36 ? 'f32（固定）' : custom && engine === 'strata' ? 'int8' : '预设默认值';
     repo.placeholder = engine === 'strata'
       ? 'ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF' : 'org/model';

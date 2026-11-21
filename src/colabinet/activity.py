@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-INFERENCE_PATHS = {"/v1/chat/completions", "/v1/completions", "/v1/messages", "/v1/embeddings", "/completion"}
+INFERENCE_PATHS = {"/v1/chat/completions", "/v1/completions", "/v1/messages", "/v1/embeddings", "/completion",
+                   "/prompt", "/v1/images/generations", "/v1/videos"}
 INFLIGHT_MAX_S = 60 * 60  # an in-flight request counts for up to 60 min (covers a 262K prefill)...
 BYTE_WINDOW_S = 5 * 60  # ...after that only while upstream bytes arrived in the last 5 min
 
