@@ -146,6 +146,11 @@ def video_graph(body: VideoRequest, seed: int, image_name: str | None = None) ->
     g["i2v"]["inputs"].update(prompt=body.prompt, width=w, height=h, length=frames(body.seconds))
     if image_name:
         g["img"]["inputs"]["image"] = image_name
+        # MiniMaxH3ImageToVideo resizes first_frame to width x height without keeping aspect: a 1:1 frame came out
+        # visibly squashed in a 1344x768 clip (G4 test). Center-crop to the target aspect first.
+        g["fit"] = {"class_type": "ImageScale", "inputs": {"image": ["img", 0], "upscale_method": "lanczos",
+                                                           "width": w, "height": h, "crop": "center"}}
+        g["i2v"]["inputs"]["first_frame"] = ["fit", 0]
     else:
         del g["img"]
         del g["i2v"]["inputs"]["first_frame"]

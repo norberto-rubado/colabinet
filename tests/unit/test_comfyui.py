@@ -149,6 +149,10 @@ def test_video_graph_loras_audio_and_text_mode(image):
     assert graph["save"]["inputs"]["format.codec"] == "h264"
     assert ("first_frame" in graph["i2v"]["inputs"]) == bool(image)
     assert ("img" in graph) == bool(image)
+    if image:  # first frame is center-cropped to the clip aspect, never stretched
+        fit = graph["fit"]["inputs"]
+        assert graph["i2v"]["inputs"]["first_frame"] == ["fit", 0] and fit["image"] == ["img", 0]
+        assert (fit["width"], fit["height"], fit["crop"]) == (768, 1344, "center")
 
 
 @pytest.mark.parametrize("schema,extra", [(ImageRequest, {"n": 0}), (ImageRequest, {"n": 9}),

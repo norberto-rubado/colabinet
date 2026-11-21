@@ -617,7 +617,7 @@ files = [
 [preset.gpu.G4]
 ctx = 32768
 [preset.measured]
-G4 = { seconds_per_output = 5.0, unit = "image", date = "2026-11-21", note = "G4 热启动：1024² Anima 1.06、WAI 2.12、Krea2 Turbo 2.39、Kroma 3.97、MOSS 5.0 秒/张；H3 2048² 2.9、4096² 15.0 秒；H3 编辑 1.86 秒；SeedVR2 ×2 1.59 秒。首次载入较慢。" }
+G4 = { seconds_per_output = 5.0, unit = "image", date = "2026-11-21", note = "实测（经公网 /v1/images/generations，含网络往返）：1024² 预热后 Krea2 Turbo 4.3、Anima 5.4、MOSS 9.9 秒/张；首张含加载 21–91 秒（H3 最慢）。直连 ComfyUI 的 G4 实测：Anima 1.06、WAI 2.12、Krea2 Turbo 2.39、Kroma 3.97、MOSS 5.0 秒；H3 2048² 2.9、4096² 15.0 秒；H3 编辑 1.86 秒；SeedVR2 ×2 1.59 秒。" }
 
 [[preset]]
 id = "comfy-video-h3"
@@ -643,5 +643,5 @@ files = [
 [preset.gpu.G4]
 ctx = 32768
 [preset.measured]
-G4 = { seconds_per_output = 80.0, unit = "video", date = "2026-11-21", note = "第三方 crhywun/h3-shortdrama 测量，尚待本机复测：G4，5 秒 768×1344 有声视频，Turbo 8 步约 80 秒，VRAM 约 39 GB。" }
+G4 = { seconds_per_output = 81.7, unit = "video", date = "2026-11-21", note = "实测：G4，经公网 /v1/videos，5 秒 1344×768 有声视频（H.264 + AAC 立体声），Turbo 8 步：文生 81.7 秒、图生 + NSFW LoRA 82.4 秒；开机到就绪约 7 分钟（44 GB）" }
 
