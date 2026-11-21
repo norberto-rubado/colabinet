@@ -355,7 +355,9 @@ async def test_gateway_images_through_real_session_proxy(tmp_path):
                 assert result.status_code == 200, result.text
                 assert base64.b64decode(result.json()["data"][0]["b64_json"]) == PNG
             await asyncio.sleep(.01)
-            assert {call.args[0].path for call in record.call_args_list} >= {"/prompt", "/history/1", "/view"}
+            paths = {call.args[0].path for call in record.call_args_list}
+            # /history polling goes through the real proxy but is not stored as a request row (R1-14).
+            assert paths >= {"/prompt", "/view"} and not any(p.startswith("/history") for p in paths)
             assert not activity._inflight and activity.last > 0
         finally:
             await gw.aclose()

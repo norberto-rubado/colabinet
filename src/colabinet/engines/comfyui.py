@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from ..comfy_files import validate_files
+from ..comfy_files import valid_release, validate_files
 from ..config import PACKAGE_DIR
 from .base import VM_DIR, VM_ROOT, RunSpec
 
@@ -20,6 +20,8 @@ class ComfyUIEngine:
         if (spec.extra_args or spec.template or spec.mmproj or spec.links or spec.prewarm
                 or spec.vision or spec.vision_offload or spec.mmproj_gpu or spec.refusal_projection):
             raise ValueError("ComfyUI 不支持 LLM 参数、模板或链接；请通过 files 添加模型与 LoRA")
+        if spec.release is not None and not valid_release(spec.release):
+            raise ValueError("ComfyUI release 必须是分支、标签或提交（字母数字开头，只含 . _ -）")
 
     def uploads(self, spec: RunSpec) -> list[tuple[Path, str]]:
         self.validate_spec(spec)

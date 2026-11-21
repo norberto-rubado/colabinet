@@ -1,6 +1,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
-  let controller;
+  // One controller per kind: a new image request must not abort a video job's status polling (and vice versa).
+  const controllers = { image: null, video: null };
   window.cbMediaTab = (kind) => {
     for (const tab of ['chat', 'image', 'video']) {
       const panel = $(`pg-${tab}-panel`);
@@ -34,8 +35,8 @@
     return data;
   };
   window.cbMediaGenerate = async (kind) => {
-    controller?.abort();
-    const current = controller = new AbortController();
+    controllers[kind]?.abort();
+    const current = controllers[kind] = new AbortController();
     const button = $(`media-${kind}-send`), status = $(`media-${kind}-status`), result = $(`media-${kind}-result`);
     button.disabled = true;
     status.textContent = '正在提交…';
@@ -95,10 +96,14 @@
     } catch (error) {
       if (!current.signal.aborted) status.textContent = `请求失败：${error.message}`;
     } finally {
-      button.disabled = false;
+      // A superseded request must not re-enable the button of the request that replaced it.
+      if (controllers[kind] === current) {
+        controllers[kind] = null;
+        button.disabled = false;
+      }
     }
   };
   document.addEventListener('DOMContentLoaded', init);
   document.addEventListener('cb:pageEnter', init);
-  document.addEventListener('cb:pageLeave', () => controller?.abort());
+  document.addEventListener('cb:pageLeave', () => Object.values(controllers).forEach((c) => c?.abort()));
 })();

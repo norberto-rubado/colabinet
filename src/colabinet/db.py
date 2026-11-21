@@ -77,6 +77,30 @@ CREATE TABLE IF NOT EXISTS gpu_rates (
 """
 
 
+# Only the console playground counts as is_playground: public gateway traffic (colabinet-gateway, including media
+# jobs) is real usage. Internal media polling (colabinet-poll) never shows up in stats or the request list.
+REQUEST_STATS_SELECT = """SELECT q.id, q.run_id, q.ts, q.method, q.path, q.status, q.stream, q.client, q.model_req,
+       q.prompt_tokens, q.cached_tokens, q.prefill_tokens, q.completion_tokens, q.reasoning_tokens,
+       q.engine_prefill_ms, q.engine_gen_ms, q.ttft_ms, q.total_ms, q.finish_reason, q.tokens_source, q.error_short,
+       r.session_id, r.engine, r.alias AS model, r.kv, r.ctx, s.colab_name AS session, s.gpu_class AS gpu,
+       -- speeds only for successful requests: an error must not drag the medians down
+       CASE WHEN q.status >= 400 THEN NULL
+            WHEN q.engine_gen_ms > 0 THEN q.completion_tokens * 1000.0 / q.engine_gen_ms
+            WHEN q.stream = 1 AND q.total_ms > q.ttft_ms THEN q.completion_tokens * 1000.0 / (q.total_ms - q.ttft_ms)
+       END AS gen_tps,
+       CASE WHEN q.status < 400 AND q.engine_prefill_ms > 0 THEN q.prefill_tokens * 1000.0 / q.engine_prefill_ms
+       END AS prefill_tps,
+       CASE WHEN q.status < 400 AND q.total_ms > 0 THEN q.completion_tokens * 1000.0 / q.total_ms END AS e2e_tps,
+       CASE WHEN q.prompt_tokens IS NULL THEN NULL
+            WHEN q.prompt_tokens < 4096 THEN '<4K' WHEN q.prompt_tokens < 32768 THEN '4-32K'
+            WHEN q.prompt_tokens < 131072 THEN '32-128K' ELSE '>128K' END AS prompt_bucket,
+       date(q.ts, 'unixepoch', 'localtime') AS day,
+       CASE WHEN q.client = 'colabinet-playground' THEN 1 ELSE 0 END AS is_playground
+FROM requests q JOIN runs r ON r.id = q.run_id JOIN sessions s ON s.id = r.session_id
+-- MediaService status polling (/history, /queue, /models/loras) is not a client request
+WHERE q.client IS NOT 'colabinet-poll';
+"""
+
 SCHEMA_V2 = """
 CREATE TABLE IF NOT EXISTS saved_queries (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, spec_json TEXT NOT NULL, created_at REAL NOT NULL
@@ -224,6 +248,9 @@ class Database:
                 conn.executescript(MIGRATIONS[migration_version])
                 conn.execute(f"PRAGMA user_version = {migration_version}")
                 conn.commit()
+            # The view holds no data: always rebuild it so a classification change reaches existing databases.
+            conn.executescript("DROP VIEW IF EXISTS request_stats;\n"
+                               f"CREATE VIEW request_stats AS\n{REQUEST_STATS_SELECT}")
         finally:
             conn.close()
 

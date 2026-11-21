@@ -119,7 +119,8 @@ def port_busy(port):
 def stop_engines(port):
     # A shell command containing these patterns can kill its own shell before reaching Tabby.
     patterns = ("[l]lama-server", "[t]abbyAPI/main.py", "[s]erve/server.py.*--engine strata",
-                "[/]engine/strata([ -]|$)", "[/]engine/strata-vision([ ]|$)", "[/]ComfyUI/main.py")
+                "[/]engine/strata([ -]|$)", "[/]engine/strata-vision([ ]|$)", "[/]ComfyUI/main.py",
+                "[s]etup_llamacpp.py --prewarm")  # the llama.cpp page-cache reader competes for disk bandwidth
     for pattern in patterns:
         subprocess.run(["pkill", "-f", pattern], capture_output=True, text=True)
     time.sleep(2)

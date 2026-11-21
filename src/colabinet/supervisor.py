@@ -54,6 +54,11 @@ EXTERNAL_TICK_S = 15.0
 EXTERNAL_BEAT_CODE = "print(1)\n"
 EXTERNAL_BEAT_ALERT_AFTER = 3  # consecutive failed heartbeats before a warning
 EXTERNAL_FORGET_S = 7 * 86400  # rows of runtimes not listed for this long are deleted
+# ComfyUI idle guard: a failed /queue probe (e.g. the SSH tunnel is down) defers the idle stop only this long after
+# the last successful /queue answer (or ready_at), and a non-empty queue keeps a session alive at most QUEUE_BUSY_MAX_S
+# in a row (a stuck node must not keep a paid VM forever).
+QUEUE_GRACE_S = 10 * 60
+QUEUE_BUSY_MAX_S = 6 * 3600
 
 
 def stop_if_cancelled() -> None:
@@ -152,6 +157,8 @@ class Supervisor:
         self._externals: dict[str, Runtime] = {}  # endpoint -> runtime, from the latest trusted reconcile
         self._externals_at: float | None = None
         self._external_beats: dict[str, dict[str, Any]] = {}  # endpoint -> {at, ok, error, failures}
+        self._queue_ok: dict[int, float] = {}  # sid -> last successful ComfyUI /queue answer
+        self._queue_busy_since: dict[int, float] = {}  # sid -> start of the current non-empty /queue streak
 
     # ------------------------------------------------------------------------------------------------- helpers
     def now(self) -> float:
@@ -634,8 +641,11 @@ class Supervisor:
         # `colab exec --env` sets os.environ inside the persistent kernel, so every key status.py reads is passed
         # on every call (otherwise e.g. WITH_TORCH=1 from the GPU check would stick to every keep-alive).
         run = await self.store.current_run(sid)
+        # The current run's events file (every engine's setup_env writes run-N.jsonl): after server_ready it still
+        # receives e.g. the llama.cpp page-cache prewarm events, which _ready consumes.
+        events = f"{VM_ROOT}/run-{run['id']}.jsonl" if run else f"{VM_ROOT}/setup.jsonl"
         full = {"VM_PORT": row["vm_port"], "EVENTS_OFFSET": row["event_offset"], "LOG_OFFSET": row["log_offset"],
-                "ENGINE_LOG": f"{VM_ROOT}/engine.log", "EVENTS": f"{VM_ROOT}/setup.jsonl", "WITH_TORCH": "0", **env,
+                "ENGINE_LOG": f"{VM_ROOT}/engine.log", "EVENTS": events, "WITH_TORCH": "0", **env,
                 "ENGINE_KIND": run["engine"] if run else "", "ENGINE_MODEL": run["alias"] or "" if run else ""}
         res = await self.cli.exec_file(row["colab_name"], VM_DIR / "status.py", {k: str(v) for k, v in full.items()})
         if res.status is None:
@@ -769,9 +779,13 @@ class Supervisor:
             st = await self._status(row, EVENTS=env["EVENTS"])
             if st:
                 await self._update(sid, event_offset=st.get("events_offset", row["event_offset"]))
-                for ev in st.get("events", []):
+                # The whole batch is consumed (the offset already moved past it): events after server_ready, such as
+                # the prewarm that starts right after it, are recorded before switching state.
+                events = st.get("events", [])
+                for i, ev in enumerate(events):
                     nxt = await self._setup_event(row, run["id"], ev)
                     if nxt:
+                        await self._late_events(sid, events[i + 1:])
                         return nxt
             if self.now() - max(t0, row["state_since"]) > self.s.setup_limit_s:
                 return await self._setup_failed(row, "设置耗时超过了设置时限")
@@ -798,6 +812,16 @@ class Supervisor:
         elif kind == "error":
             return await self._setup_failed(row, ev.get("message") or "设置出错")
         return None
+
+    async def _late_events(self, sid: int, events: list[dict[str, Any]]) -> None:
+        """Record VM events that arrive once the server is up (llama.cpp prewarm progress/done, a late error); they
+        never change the state. Only the newest `prewarm` progress of a batch is stored, to keep the feed readable."""
+        progress = [i for i, ev in enumerate(events) if ev.get("event") == "prewarm"]
+        for i, ev in enumerate(events):
+            kind = ev.get("event")
+            if not kind or (kind == "prewarm" and i != progress[-1]):
+                continue
+            await self._event(sid, f"vm:{kind}", **{k: v for k, v in ev.items() if k not in ("event", "log_tail")})
 
     async def _safe_to_tunnel(self, row: dict[str, Any]) -> bool:
         """Safe tunnel rule: allowed state + a fresh trusted listing showing NAME with our endpoint."""
@@ -882,6 +906,10 @@ class Supervisor:
                                    sid)
                 await self.stop(sid, "foreign_vm", foreign=True)
                 return None
+            offset = st.get("events_offset")
+            if offset is not None and offset != row["event_offset"]:
+                await self._update(sid, event_offset=offset)
+            await self._late_events(sid, st.get("events") or [])
             if st.get("engine_healthy"):
                 self._unhealthy[sid] = 0
                 if row["state"] == "engine_down":
@@ -1008,7 +1036,11 @@ class Supervisor:
                 raise CreateRefused(f"列表中没有名为 {name!r} 的运行时")
             if endpoint and rt.endpoint != endpoint:
                 raise CreateRefused(f"名为 {name!r} 的运行时已不是这台 VM（它可能已被停止并重新创建）；请刷新后重试")
-            await self.cli.stop(name)
+            res = await self.cli.stop(name)
+            if not res.ok:
+                # Keep keepalive / stop_after_min and the snapshot: the keepalive tick alerts and retries next tick.
+                why = "超时" if res.timed_out else bounded_diagnostic(res.out.strip(), 200) or f"退出码 {res.rc}"
+                raise CreateRefused(f"colab stop 失败：{why}")
             row = await self.store.external(rt.endpoint)
             if row and row["keepalive"]:
                 await self.store.set_external_keepalive(rt.endpoint, False, None, None)
@@ -1191,6 +1223,8 @@ class Supervisor:
         self.alerts.clear_session(sid, {"idle_warn", "create_slow", "engine_down", "gpu_mismatch", "setup_failed",
                                         "tunnel_slow", "endpoint_missing"})
         self._activity.pop(sid, None)
+        self._queue_ok.pop(sid, None)
+        self._queue_busy_since.pop(sid, None)
 
     # ---------------------------------------------------------------------------------------------- loops
     async def reconcile_once(self) -> None:
@@ -1290,19 +1324,29 @@ class Supervisor:
             sid = row["id"]
             act = self._activity.get(sid)
             run = await self.store.current_run(sid)
-            if row["state"] == "ready" and run and run["engine"] == "comfyui":
+            defer = False
+            if row["state"] != "ready":
+                self._queue_busy_since.pop(sid, None)
+            elif run and run["engine"] == "comfyui":
                 try:
                     response = await self.http.get(f"http://127.0.0.1:{row['hidden_port']}/queue", timeout=5)
                     response.raise_for_status()
                     queue = response.json()
-                    if queue.get("queue_running") or queue.get("queue_pending"):
+                    busy = bool(queue.get("queue_running") or queue.get("queue_pending"))
+                    self._queue_ok[sid] = now
+                    if not busy:
+                        self._queue_busy_since.pop(sid, None)
+                    elif now - self._queue_busy_since.setdefault(sid, now) <= QUEUE_BUSY_MAX_S:
                         act = self._activity.setdefault(sid, Activity())
                         act.reset(now)
-                except (httpx.HTTPError, ValueError):
-                    # Unknown queue is not proof of idleness. Health recovery / budget guards still run.
-                    act = self._activity.setdefault(sid, Activity())
-                    act.reset(now)
+                except (httpx.HTTPError, ValueError, AttributeError):
+                    # Unknown queue is not proof of idleness, but only for a while (the tunnel may never come back).
+                    # Deferring is never persisted as last_activity. Health recovery / budget guards still run.
+                    since = max(self._queue_ok.get(sid, 0.0), row.get("ready_at") or 0.0)
+                    defer = now - since <= QUEUE_GRACE_S
             last = act.effective(now) if act else (row["last_activity"] or 0.0)
+            if defer:
+                last = now
             d = evaluate(row, now, last, self.s.grace_s)
             if d.action == "stop":
                 await self._event(sid, "guard", reason=d.reason, message=d.message)
@@ -1450,7 +1494,8 @@ class Supervisor:
         rows = await self.store.db.fetchall(
             "SELECT s.gpu_class, r.alias, r.kv, q.completion_tokens, q.prompt_tokens, q.engine_gen_ms, q.ttft_ms "
             "FROM requests q JOIN runs r ON r.id = q.run_id JOIN sessions s ON s.id = r.session_id "
-            "WHERE q.ts >= ? AND q.status < 400 AND (q.client IS NULL OR q.client NOT LIKE 'colabinet-%')", (since,))
+            "WHERE q.ts >= ? AND q.status < 400 AND "
+            "(q.client IS NULL OR q.client NOT IN ('colabinet-playground', 'colabinet-poll'))", (since,))
         groups: dict[tuple, list[dict]] = {}
         for r in rows:
             groups.setdefault((r["gpu_class"], r["alias"], r["kv"]), []).append(r)

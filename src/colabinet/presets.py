@@ -6,7 +6,9 @@ import math
 import re
 import tomllib
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+
+from .comfy_files import safe_relative_path, valid_release
 
 KNOWN_ENGINES = {"llamacpp", "exllamav3", "strata", "comfyui"}
 FALLBACK_CLASS = {"A100-80": "A100", "T4-HIGHMEM": "T4"}
@@ -17,11 +19,8 @@ class PresetError(ValueError):
 
 
 def _model_path(value: object) -> bool:
-    """A non-empty relative path that stays inside the model directory."""
-    if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
-        return False
-    parts = PurePosixPath(value).parts
-    return bool(parts) and all(part not in ("", ".", "..") for part in parts)
+    """A non-empty relative path that stays inside the model directory (the comfy_files rule, per segment)."""
+    return safe_relative_path(value)
 
 
 def _llamacpp_fields(where: str, raw: dict) -> None:
@@ -183,4 +182,8 @@ def load_presets(path: Path) -> Presets:
             presets[raw["id"]] = Preset(**fields, gpu=gpu, evidence=evidence, measured=measured)
         except (TypeError, ValueError) as e:
             raise PresetError(f"{where}：{e}") from e
-    return Presets(engines=data.get("engines", {}), presets=presets)
+    engines = data.get("engines", {})
+    comfy = engines.get("comfyui", {}) if isinstance(engines, dict) else {}
+    if isinstance(comfy, dict) and "release" in comfy and not valid_release(comfy["release"]):
+        raise PresetError("[engines.comfyui] release 必须是 ComfyUI 的分支、标签或提交（字母数字开头，只含 . _ -）")
+    return Presets(engines=engines, presets=presets)

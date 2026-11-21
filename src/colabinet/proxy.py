@@ -58,15 +58,36 @@ def origin_ok(headers: dict[bytes, bytes]) -> bool:
     return urlsplit(origin.decode("latin-1")).hostname in LOCAL_HOSTS
 
 
-async def _read_body(receive) -> bytes | None:
-    body = b""
+MAX_BODY_BYTES = 64 * 1024 * 1024  # JSON / media requests (a 32 MiB base64 image is ~43 MB of JSON)
+POLL_CLIENT = "colabinet-poll"  # User-Agent of MediaService's /history, /queue, /models/loras polling
+MAX_UPLOAD_BYTES = 128 * 1024 * 1024  # raw ComfyUI uploads
+
+
+class BodyTooLarge(Exception):
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"请求体过大（上限 {limit // (1024 * 1024)} MiB）")
+        self.limit = limit
+
+
+async def read_body(receive, limit: int, declared: bytes | None = None) -> bytes | None:
+    """The whole request body, or None on disconnect. Raises BodyTooLarge instead of buffering past `limit`
+    bytes; `declared` (the Content-Length header) lets an oversized request fail before anything is read."""
+    with contextlib.suppress(ValueError):
+        if declared is not None and int(declared) > limit:
+            raise BodyTooLarge(limit)
+    body = bytearray()
     while True:
         m = await receive()
         if m["type"] == "http.disconnect":
             return None
-        body += m.get("body", b"")
+        chunk = m.get("body", b"")
+        if len(body) + len(chunk) > limit:
+            raise BodyTooLarge(limit)
+        if not body and not m.get("more_body"):
+            return bytes(chunk)  # single-message body: no copy
+        body += chunk
         if not m.get("more_body"):
-            return body
+            return bytes(body)
 
 
 async def _send_json(send, status: int, message: str, kind: str) -> None:
@@ -96,6 +117,8 @@ class SessionProxy:
     async def _record(self, rec: RequestRecord, run_id: int | None) -> None:
         if run_id is None:
             return
+        if rec.client == POLL_CLIENT:  # internal media status polling: activity-neutral, never a request row (R1-14)
+            return
         try:
             await self.record(rec, run_id)
         except Exception:  # a stats failure must never affect the proxied response
@@ -107,10 +130,14 @@ class SessionProxy:
         headers = dict(scope["headers"])
         if not host_ok(headers, self.port) or not origin_ok(headers):
             return await _send_json(send, 403, "colabinet: request rejected (Host/Origin)", "forbidden")
-        body = await _read_body(receive)
+        method, path = scope["method"], scope["path"]
+        limit = MAX_UPLOAD_BYTES if path.startswith(("/upload/", "/api/upload/")) else MAX_BODY_BYTES
+        try:
+            body = await read_body(receive, limit, headers.get(b"content-length"))
+        except BodyTooLarge as e:
+            return await _send_json(send, 413, f"colabinet: {e}", "request_too_large")
         if body is None:
             return
-        method, path = scope["method"], scope["path"]
         t0 = self.now()
         tap = Tap(method, path, t0, headers.get(b"user-agent", b"").decode("latin-1"), body)
         route = self.route()
@@ -174,7 +201,8 @@ class SessionProxy:
         finally:
             await resp.aclose()
         t_end = self.now()
-        self.activity.end(key, t_end, useful=inference)
+        # An error answer (e.g. a misrouted chat request hitting ComfyUI's 404) is not work the user wanted done.
+        self.activity.end(key, t_end, useful=inference and resp.status_code < 400)
         await self._record(tap.finish(t_end, 499 if disconnected else None), route.run_id)
 
 

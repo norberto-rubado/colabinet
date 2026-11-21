@@ -641,7 +641,7 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
             if kind == "image":
                 raw["response_format"] = "b64_json"
                 body = ImageRequest.model_validate(raw)
-                task = service.spawn(service.images(target, body))
+                task = service.spawn(service.images(target, body, origin="playground"))
 
                 async def stream_image():
                     # The console can also sit behind Cloudflare; valid JSON whitespace keeps cold loads alive.
@@ -653,11 +653,21 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
                         yield json.dumps(task.result()).encode()
                     except (MediaError, ValueError, KeyError) as exc:
                         yield json.dumps({"error": str(exc)}).encode()
+                    except OSError as exc:
+                        # 200 is already sent: end the body with a JSON error instead of a truncated stream.
+                        yield json.dumps({"error": f"媒体文件处理失败：{type(exc).__name__}"}).encode()
+                    except asyncio.CancelledError:
+                        # The job was cancelled (service shutdown). Close the body cleanly; if this request itself
+                        # is being cancelled, keep propagating.
+                        current = asyncio.current_task()
+                        if current is not None and current.cancelling():
+                            raise
+                        yield json.dumps({"error": "服务已关闭，生图任务已取消"}).encode()
 
                 return StreamingResponse(stream_image(), media_type="application/json",
                                          headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
             elif kind == "video":
-                result = await service.create_video(target, VideoRequest.model_validate(raw))
+                result = await service.create_video(target, VideoRequest.model_validate(raw), origin="playground")
             else:
                 raise MediaError("未知媒体类型", 404)
             return JSONResponse(result)

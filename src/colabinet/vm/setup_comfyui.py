@@ -4,6 +4,7 @@ import json
 import os
 import random
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -83,6 +84,8 @@ def download_file(item, env, attempts=4) -> int:
             run(["hf", "download", repo, name, "--local-dir", str(local)], env=env, timeout=3600)
             if not source.is_file():
                 raise RuntimeError(f"download missing {repo}/{name}")
+            if not source.resolve().is_relative_to(local.resolve()):  # e.g. a repo symlink to /etc or ../other
+                raise RuntimeError(f"{repo}/{name} resolves outside its repository directory")
             target = COMFY / "models" / directory / source.name
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary = target.with_name(target.name + ".colabinet-link")
@@ -121,21 +124,37 @@ def build_command(port):
     return [sys.executable, str(COMFY / "main.py"), "--listen", "127.0.0.1", "--port", str(port)]
 
 
-def stop_engines():
+def port_busy(port):
+    with socket.socket() as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", int(port))) == 0
+
+
+def stop_engines(port):
+    # Also the llama.cpp page-cache prewarm reader: it would compete with the model download for disk bandwidth.
     patterns = ("[l]lama-server", "[t]abbyAPI/main.py", "[s]erve/server.py.*--engine strata",
-                "[/]engine/strata([ -]|$)", "[/]engine/strata-vision([ ]|$)", "[/]ComfyUI/main.py")
+                "[/]engine/strata([ -]|$)", "[/]engine/strata-vision([ ]|$)", "[/]ComfyUI/main.py",
+                "[s]etup_llamacpp.py --prewarm")
     for pattern in patterns:
         subprocess.run(["pkill", "-f", pattern], capture_output=True)
     time.sleep(2)
     for pattern in patterns:
         subprocess.run(["pkill", "-KILL", "-f", pattern], capture_output=True)
+    # A stale listener would answer the first /system_stats probe and fake server_ready.
+    for _ in range(30):
+        if not port_busy(port):
+            return True
+        time.sleep(1)
+    return False
 
 
 def main():
     ROOT.mkdir(parents=True, exist_ok=True)
     files = json.loads(os.environ["COMFY_FILES"])
     validate_files(files)
-    stop_engines()
+    port = os.environ["COMFY_PORT"]
+    if not stop_engines(port):
+        raise RuntimeError(f"port {port} is still busy after stopping the engines")
     install(os.environ.get("COMFY_RELEASE", "master"))
     download(files)
     t = time.time()

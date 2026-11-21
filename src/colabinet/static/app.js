@@ -333,14 +333,22 @@
     projection.disabled = engine !== 'strata' || qwen36;
     document.getElementById('rc-projection-field').hidden = projection.disabled;
     if (projection.disabled) projection.value = '';
+    const comfy = engine === 'comfyui';
     const kv = document.getElementById('rc-kv');
     kv.dataset.currentKv ??= kv.placeholder;
-    if (kv.disabled !== qwen36) kv.value = '';
-    kv.disabled = qwen36;
+    if (kv.disabled !== (qwen36 || comfy)) kv.value = '';
+    kv.disabled = qwen36 || comfy;
     kv.placeholder = qwen36 ? 'f32（固定）' : select.value ? '预设默认值' : kv.dataset.currentKv;
-    kv.setAttribute('list', `rc-kv-types-${engine}`);
+    kv.setAttribute('list', `rc-kv-types-${comfy ? 'llamacpp' : engine}`);
     document.getElementById('rc-extra').placeholder = qwen36 ? '' : engine === 'exllamav3'
       ? 'model.chunk_size=4096' : engine === 'strata' ? '--ple-io direct' : '--reasoning-budget 4096';
+    // ComfyUI has no context, KV cache or engine args (ComfyUIEngine.validate_spec refuses them): hide, disable, clear.
+    for (const id of ['rc-ctx', 'rc-kv', 'rc-extra']) {
+      const control = document.getElementById(id);
+      control.closest('.field').hidden = comfy;
+      if (comfy) { control.disabled = true; control.value = ''; }
+      else if (id !== 'rc-kv') control.disabled = false;
+    }
   };
   window.cbReviewCreate = async () => {
     const form = document.getElementById('new-form');

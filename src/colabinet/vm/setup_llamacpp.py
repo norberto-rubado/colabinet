@@ -190,21 +190,53 @@ def ensure_hf(mode):
     return True
 
 
+def safe_path(value):
+    """Same rule as the host's presets/comfy_files: a relative path inside the model dir, checked per segment."""
+    return (isinstance(value, str) and bool(value) and not value.startswith(("/", "-")) and "\\" not in value
+            and "\x00" not in value and all(part not in ("", ".", "..") for part in value.split("/")))
+
+
+def inside(path, root):
+    """True when `path` resolves (symlinks followed) to `root` or below it."""
+    real, base = os.path.realpath(path), os.path.realpath(root)
+    return real == base or real.startswith(base.rstrip(os.sep) + os.sep)
+
+
+def require_inside(path, root, what):
+    if not inside(path, root):
+        raise RuntimeError(f"{what} {path} resolves outside {root}")
+
+
+def check_links(links):
+    """Re-validate LLM_LINKS on the VM (defence in depth: the host validated presets.toml)."""
+    if not isinstance(links, dict) or not all(safe_path(k) and safe_path(v) for k, v in links.items()):
+        raise ValueError(f"invalid LLM_LINKS: {links!r}")
+    return links
+
+
+def check_prewarm(names):
+    if not isinstance(names, list) or not all(safe_path(name) for name in names):
+        raise ValueError(f"invalid LLM_PREWARM: {names!r}")
+    return names
+
+
 def make_links(models, links):
     """Create `name -> target` symlinks inside the model dir (relative, so the dir can move). Idempotent: a
     correct link is kept; a wrong link or a regular file at `name` is replaced atomically. Returns links made."""
     made = 0
-    for name, target in (links or {}).items():
+    for name, target in check_links(dict(links or {})).items():
         link = os.path.join(models, name)
         real = os.path.join(models, target)
         if not os.path.isfile(real):
             raise RuntimeError(f"link target {target} for {name} is missing")
+        require_inside(real, models, "link target")
         rel = os.path.relpath(real, os.path.dirname(link))
         if os.path.islink(link) and os.readlink(link) == rel:
             continue
         if os.path.isdir(link) and not os.path.islink(link):
             raise RuntimeError(f"cannot link {name}: a directory is in the way")
         os.makedirs(os.path.dirname(link), exist_ok=True)
+        require_inside(os.path.dirname(link), models, "link directory")
         tmp = f"{link}.colabinet-link"
         if os.path.lexists(tmp):
             os.unlink(tmp)
@@ -217,20 +249,28 @@ def make_links(models, links):
 def download(repo, name, links=None, mode="xet-fast", workers=8):
     """Fetch `name` (every shard of a split GGUF) from `repo`. `links` maps file names llama.cpp expects to real
     files in the same repo: link names are not fetched, their targets are, and the links are created after."""
-    links = dict(links or {})
+    links = check_links(dict(links or {}))
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*", repo or ""):  # never an hf option
+        raise ValueError(f"invalid Hugging Face repo: {repo!r}")
     models = model_directory(repo, MODELS)
     expected = gguf_files(name)
     fetch = repo_files(name, links)
+    if not all(safe_path(path) for path in [*expected, *fetch]):  # never an hf option, never outside `models`
+        raise ValueError(f"invalid model file name: {name!r}")
     missing = [path for path in fetch if not os.path.isfile(os.path.join(models, path))]
 
     def total_bytes():
         return sum(os.path.getsize(os.path.join(models, path)) for path in fetch)
 
     def finish_links():
+        for path in fetch:  # a repo may ship a symlink that points outside its own directory
+            require_inside(os.path.join(models, path), models, "downloaded file")
         made = make_links(models, links)
         absent = [path for path in expected if not os.path.exists(os.path.join(models, path))]
         if absent:
             raise RuntimeError(f"download of {name} is incomplete (missing {absent})")
+        for path in expected:
+            require_inside(os.path.join(models, path), models, "model file")
         return {"links": len(links), "links_made": made} if links else {}
 
     if not missing:
@@ -268,10 +308,20 @@ def prewarm_paths(repo, names, models=MODELS):
     """Absolute paths for the prewarm list (link names allowed), deduplicated by the file they resolve to."""
     directory = model_directory(repo, models)
     paths = {}
-    for name in names:
+    for name in check_prewarm(list(names)):
         path = os.path.join(directory, name)
+        require_inside(path, directory, "prewarm file")
         paths.setdefault(os.path.realpath(path), path)
     return list(paths.values())
+
+
+def prewarm_root(path, models=None):
+    """The repository directory a path below MODELS belongs to (MODELS/<quoted repo>), else None."""
+    models = models or MODELS
+    rel = os.path.relpath(os.path.abspath(path), os.path.abspath(models))
+    if rel == "." or rel == ".." or rel.startswith(".." + os.sep):
+        return None
+    return os.path.join(models, rel.split(os.sep)[0])
 
 
 def start_prewarm(repo, names, models=MODELS):
@@ -296,6 +346,9 @@ def prewarm(paths, workers=PREWARM_WORKERS, chunk=PREWARM_CHUNK, interval=10.0):
     Emits `prewarm` progress about every `interval` s and one `prewarm_done`; missing files are skipped."""
     files, missing, seen = [], [], set()
     for path in paths:
+        root = prewarm_root(path)
+        if root is not None:  # a file in a repo cache must not resolve outside that repo's directory
+            require_inside(path, root, "prewarm file")
         real = os.path.realpath(path)
         if real in seen:
             continue
@@ -405,7 +458,8 @@ def main():
     mode = env.get("LLM_HF_MODE") or "xet-fast"
     hf_env(mode)  # reject an unknown mode before any download starts
     workers = int(env.get("LLM_HF_MAX_WORKERS") or 8)
-    links = json.loads(env.get("LLM_LINKS") or "{}")
+    links = check_links(json.loads(env.get("LLM_LINKS") or "{}"))
+    names = check_prewarm(json.loads(env.get("LLM_PREWARM") or "[]"))  # before any download, not after serving
     download(env["LLM_REPO"], env["LLM_FILE"], links=links, mode=mode, workers=workers)
     if env.get("LLM_MMPROJ_FILE"):
         download(env["LLM_REPO"], env["LLM_MMPROJ_FILE"], mode=mode, workers=workers)
@@ -437,7 +491,6 @@ def main():
     used = sh("nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits")[1].strip()
     event("server_ready", seconds=round(time.time() - t, 1), vram_used_mib=int(used) if used.isdigit() else None,
           modalities=props.get("modalities"), cmd=" ".join(cmd[1:]))
-    names = json.loads(env.get("LLM_PREWARM") or "[]")
     if names:
         try:  # the server is already serving: a prewarm problem is reported, never a setup error
             start_prewarm(env["LLM_REPO"], names)

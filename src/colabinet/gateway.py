@@ -18,7 +18,9 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
+import shlex
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +28,10 @@ from typing import Any, Callable
 
 import httpx
 
+from .proxy import MAX_BODY_BYTES, MAX_UPLOAD_BYTES, BodyTooLarge, read_body
+
 log = logging.getLogger("colabinet.gateway")
+UPLOAD_PATH = re.compile(r"/comfy/[^/]+/(?:api/)?upload/.*")
 
 GRACE_S = 20.0
 INTERVAL_S = 15.0
@@ -118,16 +123,30 @@ def pick(targets: list[Target], model: Any) -> tuple[Target | None, bool]:
     return None, False
 
 
+def text_targets(targets: list[Target]) -> list[Target]:
+    """Sessions that can answer LLM requests: ComfyUI media sessions only speak /comfy and the media routes."""
+    return [t for t in targets if t.engine != "comfyui" and t.kind == "text"]
+
+
+def bad_path(path: str) -> bool:
+    """`.`/`..` segments (httpx would resolve them and escape /v1) or backslashes in the ASGI-decoded path."""
+    return "\\" in path or any(seg in (".", "..") for seg in path.split("/"))
+
+
+def body_limit(path: str) -> int:
+    return MAX_UPLOAD_BYTES if UPLOAD_PATH.fullmatch(path) else MAX_BODY_BYTES
+
+
 # --- ASGI helpers ------------------------------------------------------------------------------------------------
-async def _read_body(receive) -> bytes | None:
-    body = b""
-    while True:
-        m = await receive()
-        if m["type"] == "http.disconnect":
-            return None
-        body += m.get("body", b"")
-        if not m.get("more_body"):
-            return body
+class StreamAborted(Exception):
+    """The upstream body broke after our headers went out and the response cannot be ended honestly: raising
+    makes the server drop the connection so the client sees an incomplete body instead of a clean end."""
+
+
+def _sse_data(data: bytes) -> bytes:
+    """One SSE event carrying `data`, every line prefixed (unprefixed continuation lines are dropped by clients)."""
+    lines = data.strip().splitlines() or [b""]
+    return b"".join(b"data: " + line + b"\n" for line in lines) + b"\n"
 
 
 def _error_body(message: str, kind: str, **extra: Any) -> bytes:
@@ -201,9 +220,14 @@ class Gateway:
                 "colabinet gateway: missing or invalid API key (use 'Authorization: Bearer KEY' or 'x-api-key')",
                 "authentication_error"), ((b"www-authenticate", b"Bearer"),))
         path, method = scope["path"], scope["method"]
+        if bad_path(path):  # before routing: httpx would resolve /v1/../x to /x upstream
+            return await _send_json(send, 400, _error_body("invalid path", "invalid_request_error"))
         if path != "/v1" and not path.startswith(("/v1/", "/comfy/")):
             return await _send_json(send, 404, _error_body(f"no route {method} {path}", "not_found"))
-        body = await _read_body(receive)
+        try:
+            body = await read_body(receive, body_limit(path), headers.get(b"content-length"))
+        except BodyTooLarge as e:
+            return await _send_json(send, 413, _error_body(f"colabinet gateway: {e}", "request_too_large"))
         if body is None:
             return
         targets = await self.targets()
@@ -231,11 +255,12 @@ class Gateway:
             with contextlib.suppress(ValueError, UnicodeDecodeError):
                 obj = json.loads(body)
         model = obj.get("model") if isinstance(obj, dict) else None
-        target, exact = pick(targets, model)
+        llm = text_targets(targets)
+        target, exact = pick(llm, model)
         if target is None:
-            available = [t.model_id for t in targets]
+            available = [t.model_id for t in llm]
             msg = (f"colabinet gateway: model {model!r} not found; available: {', '.join(available)}"
-                   if available else "colabinet gateway: no ready session")
+                   if available else "colabinet gateway: no ready text session")
             return await _send_json(send, 404, _error_body(msg, "model_not_found", available=available))
         if not exact and target.alias and isinstance(obj, dict) and model != target.alias:
             # Matched by colab name or as the only session: send the engine its own model id.
@@ -298,18 +323,18 @@ class Gateway:
 
         early = False
         wait = self.grace
-        while not task.done():
-            done, _ = await asyncio.wait({task}, timeout=wait)
-            if done:
-                break
-            if not early:
-                await send({"type": "http.response.start", "status": 200, "headers": [
-                    (b"content-type", b"application/json"), (b"cache-control", b"no-store"),
-                    (b"x-accel-buffering", b"no")]})
-                early = True
-            await send({"type": "http.response.body", "body": b" ", "more_body": True})
-            wait = self.interval
         try:
+            while not task.done():
+                done, _ = await asyncio.wait({task}, timeout=wait)
+                if done:
+                    break
+                if not early:
+                    await send({"type": "http.response.start", "status": 200, "headers": [
+                        (b"content-type", b"application/json"), (b"cache-control", b"no-store"),
+                        (b"x-accel-buffering", b"no")]})
+                    early = True
+                await send({"type": "http.response.body", "body": b" ", "more_body": True})
+                wait = self.interval
             result = task.result()
             # URLs use the configured public base, not an untrusted Host header.
             base = self.sup.s.public_api_base.rstrip("/")
@@ -317,8 +342,22 @@ class Gateway:
                 if "url" in item:
                     item["url"] = base + item["url"].removeprefix("/v1")
             data, status = json.dumps(result).encode(), 200
+        except asyncio.CancelledError:
+            task_now = asyncio.current_task()
+            if task_now is not None and task_now.cancelling():
+                # This request itself is being cancelled: end an already started body, then keep cancelling.
+                if early:
+                    with contextlib.suppress(Exception):
+                        await send({"type": "http.response.body", "more_body": False,
+                                    "body": _error_body("图像任务已取消", "media_error")})
+                raise
+            # Only the job was cancelled (service shutdown): answer like any other failed job.
+            data, status = _error_body("图像任务已取消", "media_error"), 503
         except (MediaError, ValueError, KeyError) as exc:
             data, status = _error_body(str(exc), "media_error"), getattr(exc, "status", 502)
+        except OSError as exc:  # e.g. ENOSPC while saving a response_format=url image
+            log.warning("image result could not be saved: %s", exc)
+            data, status = _error_body(f"保存生成结果失败：{exc.strerror or type(exc).__name__}", "media_error"), 500
         if not early:
             return await _send_json(send, status, data)
         await send({"type": "http.response.body", "body": data, "more_body": False})
@@ -368,14 +407,16 @@ class Gateway:
                                    "bad_gateway")
                 if not early:
                     return await _send_json(send, 502, data)
-                await send({"type": "http.response.body", "body": b"data: " + data + b"\n\n" if stream else data,
+                await send({"type": "http.response.body", "body": _sse_data(data) if stream else data,
                             "more_body": False})
                 return
 
             # Phase 2: stream the upstream body.
             ctype = resp.headers.get("content-type", "")
             sse = stream if early else "text/event-stream" in ctype
-            error_in_sse = early and stream and resp.status_code >= 400 and "text/event-stream" not in ctype
+            # Our early 200 promised an event stream: any other upstream body (an error, or plain JSON from an
+            # endpoint that ignores "stream": true) has to travel as one SSE event or parsers drop it.
+            wrap_in_sse = early and stream and "text/event-stream" not in ctype
             if early:
                 chunks = resp.aiter_bytes()  # our headers carry no content-encoding: decode
             else:
@@ -384,10 +425,13 @@ class Gateway:
                     out_headers.append((b"x-accel-buffering", b"no"))
                 await send({"type": "http.response.start", "status": resp.status_code, "headers": out_headers})
                 chunks = resp.aiter_raw()
-            if error_in_sse:
-                data = await resp.aread()
-                await send({"type": "http.response.body", "body": b"data: " + data.strip() + b"\n\n",
-                            "more_body": True})
+            if wrap_in_sse:
+                try:
+                    data = await resp.aread()
+                except httpx.HTTPError as e:
+                    log.warning("upstream %s body broke: %s", host, type(e).__name__)
+                    data = _error_body("upstream stream interrupted", "bad_gateway")
+                await send({"type": "http.response.body", "body": _sse_data(data), "more_body": True})
             else:
                 it = chunks.__aiter__()
                 tail = b"\n\n"  # keep-alive comments only go between complete SSE events
@@ -414,6 +458,15 @@ class Gateway:
                         break
                     except httpx.HTTPError as e:
                         log.warning("upstream %s stream broke: %s", host, type(e).__name__)
+                        if not sse or (not early and "content-length" in resp.headers):
+                            # A clean end would pass the truncated body off as complete (and break a passed-through
+                            # Content-Length): drop the connection instead.
+                            raise StreamAborted(f"upstream {host} stream broke: {type(e).__name__}") from e
+                        # Close any half-sent event, then tell the client the stream did not finish.
+                        done_event = tail.endswith((b"\n\n", b"\r\n\r\n"))
+                        sep = b"" if done_event else b"\n" if tail.endswith(b"\n") else b"\n\n"
+                        await send({"type": "http.response.body", "more_body": True, "body": sep + _sse_data(
+                            _error_body("upstream stream interrupted", "bad_gateway"))})
                         break
                     if chunk:
                         tail = (tail + chunk)[-4:]
@@ -441,14 +494,16 @@ async def ui_context(settings, store=None) -> dict[str, Any]:
     model = "<模型 ID>"
     if store is not None and enabled:
         with contextlib.suppress(Exception):
-            targets = await ready_targets(store)
+            targets = text_targets(await ready_targets(store))  # the example calls /chat/completions
             if targets:
                 model = targets[0].model_id
     body = json.dumps({"model": model, "messages": [{"role": "user", "content": "你好"}]}, ensure_ascii=False)
 
     def curl(k: str) -> str:
-        return (f"curl {base}/chat/completions \\\n  -H 'Authorization: Bearer {k}' \\\n"
-                f"  -H 'Content-Type: application/json' \\\n  -d '{body}'")
+        # shlex.quote: an alias or key containing ' must not end the shell string early.
+        return (f"curl {shlex.quote(base + '/chat/completions')} \\\n"
+                f"  -H {shlex.quote('Authorization: Bearer ' + k)} \\\n"
+                f"  -H 'Content-Type: application/json' \\\n  -d {shlex.quote(body)}")
 
     return {"enabled": enabled, "port": port, "listen": f"127.0.0.1:{port}" if enabled else "",
             "base": base, "key": key or "", "key_masked": mask(key), "key_path": str(settings.gateway_key_path),

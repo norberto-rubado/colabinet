@@ -38,6 +38,13 @@ class ImageRequest(BaseModel):
         dimensions(value)
         return value
 
+    @field_validator("negative_prompt")
+    @classmethod
+    def blank_negative_is_none(cls, value):
+        # Clients often serialise an empty input box as "": that means "no negative prompt", never "erase the
+        # workflow's default negative" or "rewire a cfg=1 graph".
+        return value if value and value.strip() else None
+
     @model_validator(mode="after")
     def check_negative(self):
         if self.negative_prompt and self.workflow not in NEGATIVE_WORKFLOWS:
@@ -121,15 +128,11 @@ def image_graph(body: ImageRequest, seed: int, image_name: str | None = None) ->
                 inp["steps"] = body.steps
     for inp in positive:
         inp["text"] = body.prompt
-    if body.negative_prompt is not None:
+    # Only real-CFG graphs take a negative prompt. cfg=1 graphs keep their verified ConditioningZeroOut wiring:
+    # rewriting it into CLIPTextEncode would break e.g. MiniMaxH3ImageConditioning and still be ignored at cfg=1.
+    if body.negative_prompt and body.workflow in NEGATIVE_WORKFLOWS:
         for inp in negative:
             inp["text"] = body.negative_prompt
-        # Distilled workflows normally zero-out conditioning; honour explicit negative_prompt too.
-        for node in g.values():
-            if node["class_type"] == "ConditioningZeroOut":
-                source = node["inputs"]["conditioning"][0]
-                clip = g[source]["inputs"]["clip"]
-                node.update(class_type="CLIPTextEncode", inputs={"clip": clip, "text": body.negative_prompt})
     return g
 
 
