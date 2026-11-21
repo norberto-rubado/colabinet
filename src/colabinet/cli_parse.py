@@ -49,6 +49,12 @@ class Listing:
         return next((r for r in self.runtimes if r.name == name), None)
 
     @property
+    def complete(self) -> bool:
+        """Trusted AND as many runtimes as `usage` bills: only then does absence from the list prove a VM is gone.
+        A partial `colab sessions` answer is still trusted for what it lists, never for what it omits (R4-01)."""
+        return self.trusted and self.usage is not None and len(self.runtimes) >= self.usage.active_assignments
+
+    @property
     def unnamed(self) -> list[Runtime]:
         return [r for r in self.runtimes if r.name is None]
 

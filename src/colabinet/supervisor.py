@@ -1040,21 +1040,23 @@ class Supervisor:
                 raise CreateRefused("当前账号已变更。请刷新概览后再停止此运行时。")
             if self.account_id is None or self.account_change_pending:
                 raise CreateRefused("请先在设置中完成账号变更。")
-            if await self.store.name_in_use(name):
-                raise CreateRefused(f"{name!r} 是托管会话：请通过会话 id 停止它")
             listing = await self.fresh_listing()
-            if endpoint and reason == "keepalive_timer" and listing.trusted and \
+            if endpoint and reason == "keepalive_timer" and listing.complete and \
                     not any(r.endpoint == endpoint for r in listing.runtimes):
                 # R3-05: the timer's VM is already gone (stopped elsewhere, or NAME now is a re-created VM): its
-                # job is done. No stop for the successor, no CRITICAL "auto-stop failed" alert.
+                # job is done. No stop for the successor, no CRITICAL "auto-stop failed" alert. R4-01: only a
+                # complete listing proves absence. R4-02: checked before name_in_use, since a freed name may
+                # already belong to a new managed session.
                 gone = self._externals.get(endpoint)
                 return await self._external_gone(endpoint, name, gone.hardware if gone else None, reason)
-            rt = listing.named(name) if listing.trusted else None
             listed = next((r for r in listing.runtimes if r.endpoint == endpoint), None) if endpoint else None
             if listing.trusted and listed is not None and not listed.name:
                 if endpoint in self._externals:
                     self._externals[endpoint] = listed  # the card shows it unnamed before the next reconcile
                 raise ExternalUnnamed(f"运行时 {endpoint} 已没有本地 CLI 名称，无法按名称停止；请在 Colab 网页中停止它")
+            if await self.store.name_in_use(name):
+                raise CreateRefused(f"{name!r} 是托管会话：请通过会话 id 停止它")
+            rt = listing.named(name) if listing.trusted else None
             if not rt:
                 raise CreateRefused(f"列表中没有名为 {name!r} 的运行时")
             if endpoint and rt.endpoint != endpoint:
@@ -1062,8 +1064,9 @@ class Supervisor:
             res = await self.cli.stop(name)
             if not res.ok:
                 after = await self.fresh_listing()
-                if after.trusted and not any(r.endpoint == rt.endpoint for r in after.runtimes):
+                if after.complete and not any(r.endpoint == rt.endpoint for r in after.runtimes):
                     # R3-05: `colab stop` failed because the runtime was already gone: that is a stopped runtime.
+                    # R4-01: a partial listing (fewer runtimes than billed) never proves it is gone.
                     return await self._external_gone(rt.endpoint, name, rt.hardware, reason)
                 # Keep keepalive / stop_after_min and the snapshot: the keepalive tick alerts and retries next tick.
                 why = "超时" if res.timed_out else bounded_diagnostic(res.out.strip(), 200) or f"退出码 {res.rc}"
