@@ -489,7 +489,7 @@ prewarm = ["IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00002-of-00002.gg
 ctx = 262144
 kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "1024", "-ub", "512", "--cache-ram", "60000",
-              "-lm", "mmap", "--lazy-mode", "on"]
+              "-lm", "mmap", "--lazy-mode", "on", "--temp", "1.0", "--top-p", "0.95", "--top-k", "20", "--min-p", "0"]
 
 [preset.measured]
 G4 = { gen_tps = 104.6, date = "2026-11-20", note = "实测：单请求（当时用 llama.cpp master 自编译）；muihbb 报告 8 并发总吞吐约 300 tok/s" }
@@ -512,7 +512,7 @@ prewarm = ["DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf"]
 [preset.gpu.G4]
 ctx = 131072
 kv = "q8_0"
-extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24"]
+extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24", "--temp", "1.0", "--top-p", "0.95"]  # model-card sampling as server default
 
 [preset.measured]
 G4 = { gen_tps = 58.1, prefill_tps = 526, date = "2026-11-20", note = "实测：b12584，下载 183 GB 约 9 分钟，VRAM 71.5 GB，Engram 预读 334 秒" }
@@ -533,7 +533,7 @@ parallel = 2
 ctx = 131072
 kv = "q8_0"
 # 101.8 GB of weights: the experts of 6 layers stay in host RAM so the rest fits in 96 GB (VRAM 91.3 GB measured).
-extra_args = ["-ngl", "99", "--n-cpu-moe", "6", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24"]
+extra_args = ["-ngl", "99", "--n-cpu-moe", "6", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24", "--temp", "1.0", "--top-p", "0.95"]  # model-card sampling as server default
 
 [preset.measured]
 G4 = { gen_tps = 57.6, prefill_tps = 1094, date = "2026-11-20", note = "实测：b12584，下载 102 GB 约 5 分钟，冷启动到可用约 8 分钟" }
@@ -556,7 +556,7 @@ prewarm = ["IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00002-of-00002.gguf"]
 ctx = 262144
 kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "1024", "-ub", "512", "--cache-ram", "60000",
-              "-lm", "mmap", "--lazy-mode", "on"]
+              "-lm", "mmap", "--lazy-mode", "on", "--temp", "1.0", "--top-p", "0.95", "--top-k", "20", "--min-p", "0"]
 
 [preset.measured]
 G4 = { gen_tps = 105.9, prefill_tps = 3827, date = "2026-11-21", note = "实测：b12584，经公网网关；开机到就绪 5.5 分钟；原版会拒绝写 SYN 扫描器" }
@@ -579,7 +579,7 @@ prewarm = ["DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf"]
 [preset.gpu.G4]
 ctx = 131072
 kv = "q8_0"
-extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24"]
+extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24", "--temp", "1.0", "--top-p", "0.95"]  # model-card sampling as server default
 
 [preset.measured]
 G4 = { gen_tps = 59.3, date = "2026-11-21", note = "实测：b12584，Engram 预读完成后；开机到就绪 13 分钟，之后再预读约 5 分钟。关思考用 reasoning_effort=none" }
