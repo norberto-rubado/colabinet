@@ -308,7 +308,7 @@ ctx = 131072
 kv = "int8"
 
 [preset.gpu.G4]
-ctx = 131072
+ctx = 262144  # 2026-11-22 measured on G4: 243,786-token prompt, 3/3 needles, prefill 8.8K tok/s, VRAM 48.1 GB
 kv = "int8"
 
 [preset.evidence.L4]
