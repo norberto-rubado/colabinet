@@ -749,3 +749,17 @@ async def test_r5_06_account_emails_are_marked_email_off(login_console):
     await connect(client)
     markup = (await client.get("/ui/auth")).text
     assert "<!--email_off-->reviewer@example.com<!--/email_off-->" in markup
+
+
+async def test_r6_02_wrong_account_error_keeps_the_expected_email_readable(login_console):
+    """R6-02: '请选择 <email> 来登录此已保存的账号' must be inside email_off, or Cloudflare hides the email it asks for."""
+    _, client, *_, sup = login_console
+    await connect(client)
+    owner = sup.account_id
+    await client.post("/ui/actions/auth/logout", data={"account_id": owner}, headers=CSRF)
+    response = await client.post("/ui/actions/auth/start", data={"account_id": owner}, headers=CSRF)
+    assert response.status_code == 200
+    markup = await wait_state(client, "waiting")
+    await client.post("/ui/actions/auth/code", data={"flow_id": flow_id(markup), "code": "other-code"}, headers=CSRF)
+    markup = await wait_state(client, "failed")
+    assert "<!--email_off-->请选择 reviewer@example.com" in markup
