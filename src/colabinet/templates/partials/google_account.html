@@ -20,7 +20,7 @@
              'verifying': '正在验证 Google 账号…', 'cancelling': '正在取消登录…'}[account.state] }}</span></p>
       {% elif account.state == 'cancelled' %}<p>已取消登录，可重新开始。</p>
       {% elif account.state == 'signed_out' %}<p>已从此控制台退出登录。请重新登录或切换到其他已保存的账号。</p>
-      {% elif account.error %}<div class="alert" data-variant="warning">{{ icon('alert') }}<h2>账号未连接</h2><section><p>{{ account.error }}</p></section></div>
+      {% elif account.error %}<div class="alert" data-variant="warning">{{ icon('alert') }}<h2>账号未连接</h2><section><p><!--email_off-->{{ account.error }}<!--/email_off--></p></section></div>
       {% else %}<p>请检查连接，或登录你的 Google 账号。</p>{% endif %}
     </div>
     {% if account.active_email and account.state != 'connected' %}

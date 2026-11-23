@@ -312,3 +312,28 @@ def test_r5_06_every_rendered_account_email_is_wrapped_in_email_off():
                 if "data-account-email" in line or "[0]" in expr:
                     continue  # attribute values and the avatar initial are not rewritten by Cloudflare
                 assert f"<!--email_off-->{expr}" in line, (path.name, line.strip())
+
+
+def test_r6_01_two_hop_env_prefixes_are_chained_not_flattened(tmp_path):
+    """R6-01: outer `env -u A K=V` + inner polyglot `env -u B` must run; flattening made env exec `-u` (rc 127)."""
+    wrapper, shared = fake_cli(tmp_path)
+    launcher = tmp_path / "lib" / "colab"
+    body = launcher.read_text().split("\n", 1)[1]
+    launcher.write_text(f"#!/bin/sh\n'''exec' env -u PYTHONHOME '{sys.executable}' \"$0\" \"$@\"\n' '''\n" + body)
+    shared.write_text(SHARED_EMAIL)
+    cli = ColabCLI(str(wrapper), time.time, profile=tmp_path / "p")
+    assert run(cli.command(), "whoami") == "Email:         none"
+    assert asyncio.run(ColabCLI(str(wrapper), time.time).shared_token()) == (True, SHARED_EMAIL)
+
+
+@pytest.mark.parametrize("unset", ['-u "$VAR"', "--unset=", "-u 1BAD"])
+def test_r6_01_dynamic_or_invalid_unset_names_are_rejected(tmp_path, unset):
+    wrapper, _ = fake_cli(tmp_path, wrapper=f'exec env {unset} {{launcher}} "$@"')  # a real launcher target
+    with pytest.raises(OSError):
+        ColabCLI(str(wrapper), time.time, profile=tmp_path / "p").launcher()
+
+
+def test_r6_02_error_messages_are_wrapped_in_email_off():
+    """R6-02: LoginError texts can carry an email (wrong account on re-login), so the alert is email_off too."""
+    card = (Path(__file__).parents[2] / "src" / "colabinet" / "templates" / "partials" / "google_account.html")
+    assert "<!--email_off-->{{ account.error }}<!--/email_off-->" in card.read_text()

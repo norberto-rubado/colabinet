@@ -35,6 +35,13 @@ WRAPPER_HEAD = 8192
 SHELLS = {"sh", "bash", "dash", "zsh"}
 EXEC_LINE = re.compile(r"^\s*(?:'''exec'|exec)\s")
 ENV_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=[^$`]*\Z")
+ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _env_name(name: str) -> str:
+    if not ENV_NAME.match(name):  # `-u "$VAR"` or an empty name (R6-01)
+        raise ValueError
+    return name
 
 
 @dataclass(frozen=True)
@@ -95,11 +102,11 @@ def _resolve_launcher(path: str, hop: int = 0) -> Launcher:
             if word in ("-i", "-", "--ignore-environment"):
                 env.append("-i")
             elif word in ("-u", "--unset") and words:
-                env += ["-u", words.pop(0)]
+                env += ["-u", _env_name(words.pop(0))]
             elif word.startswith("-u") and len(word) > 2:
-                env += ["-u", word[2:]]
+                env += ["-u", _env_name(word[2:])]
             elif word.startswith("--unset="):
-                env += ["-u", word[len("--unset="):]]
+                env += ["-u", _env_name(word[len("--unset="):])]
             elif ENV_ASSIGN.match(word):
                 env.append(word)
             else:
@@ -114,8 +121,8 @@ def _resolve_launcher(path: str, hop: int = 0) -> Launcher:
     if hop or any("$" in word or "`" in word for word in rest):
         raise ValueError
     inner = _resolve_launcher(target, 1)
-    merged = (*env, *inner.env[1:]) if env and inner.env else (*env, *inner.env)
-    return Launcher(inner.interpreter, inner.binary, (*inner.args, *rest), tuple(merged))
+    # Chain the two env calls: a flattened `env K=V -u X` would treat the inner `-u` as the command (R6-01).
+    return Launcher(inner.interpreter, inner.binary, (*inner.args, *rest), (*env, *inner.env))
 
 
 @dataclass
