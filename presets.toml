@@ -530,7 +530,7 @@ licence = "MIT"
 parallel = 2
 
 [preset.gpu.G4]
-ctx = 262144  # 2026-11-22 measured on G4: 242K-token prompt, 3/3 needles, VRAM 91.4 -> 92.8 GB (sparse attention)
+ctx = 524288  # 2026-11-23 measured on G4: 484,103-token prompt, 3/3 needles, prefill 671 tok/s (12 min), VRAM 96.5 of 97.9 GB; 262144 earlier: 242K 3/3, 92.8 GB
 kv = "q8_0"
 # 101.8 GB of weights: the experts of 6 layers stay in host RAM so the rest fits in 96 GB (VRAM 91.3 GB measured).
 extra_args = ["-ngl", "99", "--n-cpu-moe", "6", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24", "--temp", "1.0", "--top-p", "0.95"]  # model-card sampling as server default
