@@ -72,19 +72,49 @@ class ColabCLI:
     def for_profile(self, profile: Path | None, *, enabled: bool = True) -> ColabCLI:
         return ColabCLI(self.binary, self.now, self.log, self.timeouts, self.auth, profile, enabled)
 
-    def command(self) -> list[str]:
-        if self.profile is None:
-            return [self.binary, *self.auth_args]
+    @staticmethod
+    def _shebang(path: str) -> list[str]:
+        with open(path, "rb") as file:
+            header = file.readline(4096).decode().strip()
+        return shlex.split(header[2:]) if header.startswith("#!") else []
+
+    def launcher(self) -> tuple[list[str], str]:
+        """The official Python launcher and its interpreter.
+
+        `--colab-bin` may be a small `#!/bin/sh` wrapper that ends in `exec ... <launcher> "$@"` (e.g. one that sets
+        PYTHON_KEYRING_BACKEND). Follow that one hop so account profiles keep working behind such a wrapper."""
         try:
-            with open(self.binary, "rb") as file:
-                header = file.readline(4096).decode().strip()
-            interpreter = shlex.split(header[2:]) if header.startswith("#!") else []
+            interpreter = self._shebang(self.binary)
+            binary = self.binary
+            if interpreter and not any("python" in Path(part).name for part in interpreter):
+                text = Path(self.binary).read_text(errors="replace")[:8192]
+                match = re.search(r'^\s*exec\s+(.*?)\s+"\$@"\s*$', text, re.M)
+                target = next((part for part in reversed(shlex.split(match[1])) if part.startswith("/")),
+                              None) if match else None
+                if not target:
+                    raise ValueError
+                binary, interpreter = target, self._shebang(target)
             if not interpreter or not any("python" in Path(part).name for part in interpreter):
                 raise ValueError
         except (OSError, UnicodeError, ValueError):
             raise OSError("Account profiles require the official Python colab launcher.") from None
+        return interpreter, binary
+
+    def command(self) -> list[str]:
+        if self.profile is None:
+            return [self.binary, *self.auth_args]
+        interpreter, binary = self.launcher()
         return [*interpreter, str(Path(__file__).with_name("cli_profile.py")), str(self.profile),
-                self.binary, *self.auth_args]
+                binary, *self.auth_args]
+
+    def store_shared_token(self, token: Path) -> None:
+        """Install a re-authenticated token as the shared CLI account (0.8+ keeps it in the OS keyring)."""
+        interpreter, binary = self.launcher()
+        result = subprocess.run([*interpreter, str(Path(__file__).with_name("cli_profile.py")), "--store-shared",
+                                 str(token), binary], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=60, check=False)
+        if result.returncode:
+            raise OSError("Could not store the shared CLI credentials.")
 
     def login(self) -> int:
         """Let the official CLI handle consent in the user's terminal. Usage does not allocate a runtime."""

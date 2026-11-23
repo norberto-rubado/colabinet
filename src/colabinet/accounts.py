@@ -156,6 +156,8 @@ class Accounts:
                 os.replace(token, backup)
             try:
                 os.replace(temporary, token)
+                if current.profile is None:  # 0.8+ reads the shared token from the OS keyring, not token.json
+                    current.store_shared_token(token)
                 account_id = self.remember(email, current)
             except OSError:
                 if had_token:
