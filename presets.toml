@@ -510,7 +510,7 @@ links = { "DeepSeek-V4.1-Flash-1017-Uncensored-GSQ-RCO-Coder-IQ2_XXS-00006-of-00
 prewarm = ["DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf"]
 
 [preset.gpu.G4]
-ctx = 131072
+ctx = 524288  # 2026-11-23 measured on G4: 479,997-token prompt, 3/3 needles, prefill 211 tok/s (38 min), VRAM 78.4 GB at start
 kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24", "--temp", "1.0", "--top-p", "0.95"]  # model-card sampling as server default
 
