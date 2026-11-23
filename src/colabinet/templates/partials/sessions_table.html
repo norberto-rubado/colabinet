@@ -10,7 +10,7 @@
   <tbody>
   {% for session in rows %}
     <tr data-cb-key="session-{{ session.id }}">
-      <td><a href="/sessions/{{ session.id }}" {{ nav_attrs() }}><strong>{{ session.colab_name }}</strong></a><br><small class="cb-muted">{{ session.account_email }}</small><small class="cb-muted cb-created-compact"><br>{{ session.created_at | day }}</small></td>
+      <td><a href="/sessions/{{ session.id }}" {{ nav_attrs() }}><strong>{{ session.colab_name }}</strong></a><br><small class="cb-muted"><!--email_off-->{{ session.account_email }}<!--/email_off--></small><small class="cb-muted cb-created-compact"><br>{{ session.created_at | day }}</small></td>
       <td>{{ state_badge(session.state, session.stop_unconfirmed, session.progress) }}{% if session.creation_error %}<br><small class="cb-muted" title="{{ session.creation_error }}">{{ session.creation_error.splitlines()[-1][:80] }}</small>{% endif %}</td>
       <td>{{ session.gpu_name or session.gpu_class or session.gpu_requested }}</td>
       <td class="cb-model" title="{{ session.run.repo if session.run else '' }}">{% if session.run %}<span>{{ session.run.alias }}</span><span class="cb-sub">{{ session.run.engine }} · {{ ((session.run.ctx or 0) // 1024) }}K · {{ session.run.kv }}</span>{% else %}<span class="cb-muted">—</span>{% endif %}</td>

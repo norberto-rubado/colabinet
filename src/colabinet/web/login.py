@@ -255,6 +255,9 @@ class GoogleLogin:
             error = str(exc)
         except OSError:
             error = "Colab CLI 无法运行。请检查其安装和路径。"
+        except Exception:  # never leave the card stuck in "verifying" with polling stopped (R5-02)
+            log.exception("Google sign-in failed unexpectedly")
+            error = "登录时发生意外错误。请重新登录。"
         finally:
             if proc is not None:
                 if proc.stdin:

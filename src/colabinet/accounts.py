@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -133,13 +134,17 @@ class Accounts:
         self.get(account_id)
         self._commit(account_id, self.rows)
 
-    def repair(self, email: str, candidate: ColabCLI, current: ColabCLI) -> str:
+    async def repair(self, email: str, candidate: ColabCLI, current: ColabCLI) -> str:
         """Replace only the same owner's credentials, preserving the CLI session store and running tunnels."""
         row = self.get(self.active)
         if row["email"].casefold() != email.casefold():
             raise ValueError("Choose the Google account that owns these sessions.")
+        if current.profile is None:
+            uses_keyring, previous = await current.shared_token()
+            if uses_keyring:
+                return await self._repair_shared_keyring(email, candidate, current, previous)
         target = current.profile or Path.home() / ".config" / "colab-cli"
-        target.mkdir(parents=True, exist_ok=True)
+        target.mkdir(mode=0o700, parents=True, exist_ok=True)
         token = target / "token.json"
         if token.is_symlink():
             raise ValueError("Credential files must not be symbolic links.")
@@ -156,8 +161,6 @@ class Accounts:
                 os.replace(token, backup)
             try:
                 os.replace(temporary, token)
-                if current.profile is None:  # 0.8+ reads the shared token from the OS keyring, not token.json
-                    current.store_shared_token(token)
                 account_id = self.remember(email, current)
             except OSError:
                 if had_token:
@@ -169,6 +172,24 @@ class Accounts:
             return account_id
         finally:
             temporary.unlink(missing_ok=True)
+
+    async def _repair_shared_keyring(self, email: str, candidate: ColabCLI, current: ColabCLI,
+                                     previous: str | None) -> str:
+        """0.8+ shared account: swap the keyring token, prove the shared CLI reads it back as the owner, and put the
+        previous token back if that check or the metadata write fails (R5-01, R5-03). No plaintext copy is written
+        to ~/.config/colab-cli."""
+        new = (candidate.profile / "token.json").read_text()
+        await current.set_shared_token(new)
+        try:
+            if (await current.identity() or "").casefold() != email.casefold():
+                raise OSError("The shared CLI did not read back the new credentials.")
+            return self.remember(email, current)
+        except BaseException:
+            try:
+                await current.set_shared_token(previous)
+            except (OSError, asyncio.CancelledError):
+                log.warning("Could not restore the previous shared CLI credentials.")
+            raise
 
     def logout(self) -> None:
         rows = [dict(row) for row in self.rows]

@@ -727,3 +727,25 @@ return await evaluate(`({retained: ${retained}, connected: document.getElementBy
         assert all(json.loads(line)[-1] in ("usage", "whoami") for line in journal.read_text().splitlines())
     finally:
         await stop_server(server, task)
+
+
+async def test_r5_02_unexpected_activation_error_fails_the_card_instead_of_hanging(login_console, monkeypatch):
+    """R5-02: a non-OSError from account activation must end in 'failed' with a message, not a silent 'verifying'."""
+    _, client, *_, sup = login_console
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("synthetic")
+
+    monkeypatch.setattr(sup, "activate_account", broken)
+    markup = await start(client)
+    await client.post("/ui/actions/auth/code", data={"flow_id": flow_id(markup), "code": "fake-code"}, headers=CSRF)
+    markup = await wait_state(client, "failed")
+    assert "意外错误" in markup
+
+
+async def test_r5_06_account_emails_are_marked_email_off(login_console):
+    """R5-06: Cloudflare Email Obfuscation must skip the account emails (it never decodes HTMX partials)."""
+    _, client, *_ = login_console
+    await connect(client)
+    markup = (await client.get("/ui/auth")).text
+    assert "<!--email_off-->reviewer@example.com<!--/email_off-->" in markup

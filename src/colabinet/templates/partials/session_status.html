@@ -35,7 +35,7 @@
 <div class="cb-grid-2" data-cb-key="hardware-cost">
   <section class="card"><header>{{ card_title('硬件与运行', 'gpu') }}</header>
     <section><dl class="cb-kv">
-      <dt>Google 账号</dt><dd>{{ session.account_email }}</dd>
+      <dt>Google 账号</dt><dd><!--email_off-->{{ session.account_email }}<!--/email_off--></dd>
       <dt>GPU</dt><dd>{{ session.gpu_name or session.gpu_class or session.gpu_requested }}{% if session.vram_mib %} · {{ (session.vram_mib / 1024) | round(1) }} GiB{% endif %}{% if session.driver %} · 驱动 {{ session.driver }}{% endif %}{% if session.torch_cuda %} · torch CUDA {{ session.torch_cuda }}{% endif %}</dd>
       <dt>推理引擎</dt><dd>{{ run.engine or '-' }} {{ run.engine_version or '' }}</dd>
       <dt>模型</dt><dd class="cb-truncate" title="{{ run.repo }}">{{ run.repo or '-' }} · {{ run.file_or_rev or '' }}</dd>

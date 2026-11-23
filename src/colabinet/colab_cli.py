@@ -12,6 +12,7 @@ import contextlib
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -25,7 +26,96 @@ from .config import cli_flags
 SECRET_KEY = re.compile(r"(TOKEN|KEY|SECRET|PASSWORD)", re.I)
 PROXY_TOKEN = re.compile(r"(colab-runtime-proxy-token=)[^&\s]+")
 
-TIMEOUTS = {"sessions": 30.0, "usage": 30.0, "upload": 120.0, "exec": 90.0, "stop": 60.0, "heartbeat": 45.0}
+TIMEOUTS = {"sessions": 30.0, "usage": 30.0, "upload": 120.0, "exec": 90.0, "stop": 60.0, "heartbeat": 45.0,
+            "keyring": 60.0}
+
+CLI_PROFILE = str(Path(__file__).with_name("cli_profile.py"))
+SHARED_NO_KEYRING, SHARED_NO_TOKEN = 3, 4  # cli_profile.py --shared-token exit codes
+WRAPPER_HEAD = 8192
+SHELLS = {"sh", "bash", "dash", "zsh"}
+EXEC_LINE = re.compile(r"^\s*(?:'''exec'|exec)\s")
+ENV_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=[^$`]*\Z")
+
+
+@dataclass(frozen=True)
+class Launcher:
+    interpreter: list[str]
+    binary: str
+    args: tuple[str, ...] = ()  # fixed arguments the wrapper passes before the caller's
+    env: tuple[str, ...] = ()  # an `env ...` prefix replaying the wrapper's environment changes
+
+
+def _is_python(words: list[str]) -> bool:
+    return any("python" in Path(word).name for word in words)
+
+
+def _shebang(path: str) -> list[str]:
+    with open(path, "rb") as file:
+        header = file.readline(4096).decode().strip()
+    return shlex.split(header[2:]) if header.startswith("#!") else []
+
+
+def _exec_words(path: str) -> list[str]:
+    """The words of the wrapper's single top-level `exec` line (continuations joined, comments dropped)."""
+    with open(path, "rb") as file:
+        text = file.read(WRAPPER_HEAD).decode()
+    text = text.replace("\r\n", "\n").replace("\\\n", "")
+    lines = [shlex.split(line, comments=True) for line in text.split("\n")[1:] if EXEC_LINE.match(line)]
+    lines = [words for words in lines if words and words[0] == "exec"]
+    if len(lines) != 1:  # none, or branches we cannot evaluate
+        raise ValueError
+    return lines[0][1:]
+
+
+def _expand(word: str) -> str:
+    for prefix in ("${HOME}", "$HOME", "~"):
+        if word == prefix or word.startswith(prefix + "/"):
+            word = str(Path.home()) + word[len(prefix):]
+            break
+    if "$" in word or "`" in word or not os.path.isabs(word):
+        raise ValueError
+    return word
+
+
+def _resolve_launcher(path: str, hop: int = 0) -> Launcher:
+    shebang = _shebang(path)
+    if shebang and _is_python(shebang):
+        return Launcher(shebang, path)
+    if not shebang or Path(shebang[0]).name not in SHELLS and not (
+            Path(shebang[0]).name == "env" and shebang[1:2] and shebang[1] in SHELLS):
+        raise ValueError
+    words = _exec_words(path)
+    if not words or words[-1] != "$@":
+        raise ValueError
+    words, env = words[:-1], []
+    if words and Path(words[0]).name == "env":
+        words, env = words[1:], [shutil.which("env") or "/usr/bin/env"]
+        while words and words[0] != "--" and (words[0].startswith("-") or "=" in words[0]):
+            word = words.pop(0)
+            if word in ("-i", "-", "--ignore-environment"):
+                env.append("-i")
+            elif word in ("-u", "--unset") and words:
+                env += ["-u", words.pop(0)]
+            elif word.startswith("-u") and len(word) > 2:
+                env += ["-u", word[2:]]
+            elif word.startswith("--unset="):
+                env += ["-u", word[len("--unset="):]]
+            elif ENV_ASSIGN.match(word):
+                env.append(word)
+            else:
+                raise ValueError
+        if words[:1] == ["--"]:
+            words = words[1:]
+    if not words:
+        raise ValueError
+    target, rest = _expand(words[0]), words[1:]
+    if _is_python([target]) and rest == ["$0"]:  # pip/uv polyglot launcher: '''exec' '<python>' "$0" "$@"
+        return Launcher([target], path, (), tuple(env))
+    if hop or any("$" in word or "`" in word for word in rest):
+        raise ValueError
+    inner = _resolve_launcher(target, 1)
+    merged = (*env, *inner.env[1:]) if env and inner.env else (*env, *inner.env)
+    return Launcher(inner.interpreter, inner.binary, (*inner.args, *rest), tuple(merged))
 
 
 @dataclass
@@ -72,48 +162,59 @@ class ColabCLI:
     def for_profile(self, profile: Path | None, *, enabled: bool = True) -> ColabCLI:
         return ColabCLI(self.binary, self.now, self.log, self.timeouts, self.auth, profile, enabled)
 
-    @staticmethod
-    def _shebang(path: str) -> list[str]:
-        with open(path, "rb") as file:
-            header = file.readline(4096).decode().strip()
-        return shlex.split(header[2:]) if header.startswith("#!") else []
+    def launcher(self) -> Launcher:
+        """The official Python launcher behind `--colab-bin`, with the environment a shell wrapper sets for it.
 
-    def launcher(self) -> tuple[list[str], str]:
-        """The official Python launcher and its interpreter.
-
-        `--colab-bin` may be a small `#!/bin/sh` wrapper that ends in `exec ... <launcher> "$@"` (e.g. one that sets
-        PYTHON_KEYRING_BACKEND). Follow that one hop so account profiles keep working behind such a wrapper."""
+        `--colab-bin` may be a small `#!/bin/sh` wrapper ending in `exec [env -u X K=V] <launcher> [args] "$@"` (this
+        host's strips PYTHONPATH and sets PYTHON_KEYRING_BACKEND). Profile commands bypass the wrapper, so they get
+        its `env` operations and fixed arguments replayed (R5-01, R5-04)."""
         try:
-            interpreter = self._shebang(self.binary)
-            binary = self.binary
-            if interpreter and not any("python" in Path(part).name for part in interpreter):
-                text = Path(self.binary).read_text(errors="replace")[:8192]
-                match = re.search(r'^\s*exec\s+(.*?)\s+"\$@"\s*$', text, re.M)
-                target = next((part for part in reversed(shlex.split(match[1])) if part.startswith("/")),
-                              None) if match else None
-                if not target:
-                    raise ValueError
-                binary, interpreter = target, self._shebang(target)
-            if not interpreter or not any("python" in Path(part).name for part in interpreter):
-                raise ValueError
+            return _resolve_launcher(self.binary)
         except (OSError, UnicodeError, ValueError):
             raise OSError("Account profiles require the official Python colab launcher.") from None
-        return interpreter, binary
 
     def command(self) -> list[str]:
         if self.profile is None:
             return [self.binary, *self.auth_args]
-        interpreter, binary = self.launcher()
-        return [*interpreter, str(Path(__file__).with_name("cli_profile.py")), str(self.profile),
-                binary, *self.auth_args]
+        launch = self.launcher()
+        return [*launch.env, *launch.interpreter, CLI_PROFILE, str(self.profile), launch.binary, *launch.args,
+                *self.auth_args]
 
-    def store_shared_token(self, token: Path) -> None:
-        """Install a re-authenticated token as the shared CLI account (0.8+ keeps it in the OS keyring)."""
-        interpreter, binary = self.launcher()
-        result = subprocess.run([*interpreter, str(Path(__file__).with_name("cli_profile.py")), "--store-shared",
-                                 str(token), binary], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, timeout=60, check=False)
-        if result.returncode:
+    async def _shared_token_op(self, op: str, data: bytes | None = None) -> tuple[int, bytes]:
+        """Read or write the shared CLI's keyring token through the official CLI's own keyring setup.
+
+        Async with a watchdog: a slow keyring must neither freeze the event loop nor escape as a non-OSError
+        (R5-02). The token travels over pipes only; it is never logged."""
+        launch = self.launcher()
+        proc = await asyncio.create_subprocess_exec(
+            *launch.env, *launch.interpreter, CLI_PROFILE, "--shared-token", op, launch.binary,
+            stdin=asyncio.subprocess.PIPE if data is not None else asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(data), self.timeouts["keyring"])
+        except TimeoutError:
+            self._kill(proc)
+            await proc.wait()
+            raise OSError("Timed out accessing the shared CLI credentials.") from None
+        except asyncio.CancelledError:
+            self._kill(proc)
+            raise
+        return proc.returncode or 0, out
+
+    async def shared_token(self) -> tuple[bool, str | None]:
+        """(keyring store in use, current token). 0.7.x CLIs keep the token in a file and report False."""
+        rc, out = await self._shared_token_op("get")
+        if rc == 0:
+            return True, out.decode()
+        if rc in (SHARED_NO_TOKEN, SHARED_NO_KEYRING):
+            return rc == SHARED_NO_TOKEN, None
+        raise OSError("Could not read the shared CLI credentials.")
+
+    async def set_shared_token(self, token: str | None) -> None:
+        """Store (or, for None, delete) the shared CLI's keyring token."""
+        rc, _ = await (self._shared_token_op("set", token.encode()) if token is not None
+                       else self._shared_token_op("delete"))
+        if rc:
             raise OSError("Could not store the shared CLI credentials.")
 
     def login(self) -> int:

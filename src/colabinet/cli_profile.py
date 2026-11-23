@@ -6,15 +6,20 @@ Upstream 0.8 keeps the OAuth token in a single OS-keyring entry per OS user, so 
 keyring reads/writes to its own token.json. Without that, every profile sees the shared CLI account and a new
 sign-in overwrites it.
 
-`cli_profile.py --store-shared TOKEN_FILE BINARY` writes a token into the shared (non-profile) CLI keyring entry;
-Accounts.repair uses it when the shared account is re-authenticated.
+`cli_profile.py --shared-token get|set|delete BINARY` reads or writes the shared (non-profile) CLI keyring entry with
+the CLI's own keyring code; Accounts.repair uses it when the shared account is re-authenticated. `set` reads the
+token from stdin and `get` prints it to stdout, so it never appears on a command line. Exit codes: 3 = this CLI has no
+keyring store (0.7.x), 4 = no token stored.
 """
 
 import logging
 import os
 import runpy
 import sys
+import uuid
 from pathlib import Path
+
+NO_KEYRING, NO_TOKEN = 3, 4
 
 
 def _import_cli(binary: str):
@@ -27,8 +32,10 @@ def _import_cli(binary: str):
 
 
 def _write_private(path: Path, text: str) -> None:
-    temporary = path.with_name(f".{os.getpid()}.token.tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    """Atomically replace `path` with a new 0600 file. A unique O_EXCL temporary never reuses a leftover file or
+    follows a planted symlink (R5-05)."""
+    temporary = path.with_name(f".{uuid.uuid4().hex}.token.tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
         with os.fdopen(fd, "w") as file:
             file.write(text)
@@ -38,27 +45,45 @@ def _write_private(path: Path, text: str) -> None:
     finally:
         try:
             temporary.unlink()
-        except FileNotFoundError:
+        except OSError:
             pass
 
 
-def store_shared(source: str, binary: str) -> None:
+def shared_token(op: str, binary: str) -> int:
     try:
         auth, _ = _import_cli(binary)
     except (ImportError, AttributeError):
         sys.exit("Shared re-authentication requires the official google-colab-cli Python installation.")
-    if hasattr(auth, "_save_token_to_keyring"):
-        auth._save_token_to_keyring(Path(source).read_text())
-    # 0.7.x reads TOKEN_CONFIG_PATH, which Accounts.repair has already replaced.
+    if not hasattr(auth, "_save_token_to_keyring"):
+        return NO_KEYRING  # 0.7.x reads TOKEN_CONFIG_PATH, a file Accounts.repair replaces itself
+    if op == "get":
+        token = auth._get_token_from_keyring()
+        if not token:
+            return NO_TOKEN
+        sys.stdout.write(token)
+    elif op == "set":
+        token = sys.stdin.read()
+        if not token.strip():
+            return 2
+        auth._save_token_to_keyring(token)
+    elif op == "delete":
+        import keyring
+        import keyring.errors
+        try:
+            keyring.delete_password(auth.KEYRING_SERVICE_NAME, auth.KEYRING_USERNAME)
+        except keyring.errors.PasswordDeleteError:
+            pass
+    else:
+        return 2
+    return 0
 
 
 def main() -> None:
-    if sys.argv[1:2] == ["--store-shared"]:
-        store_shared(*sys.argv[2:4])
-        return
+    os.umask(0o077)  # also covers keyring files and directories created by --shared-token (R5-03)
+    if sys.argv[1:2] == ["--shared-token"]:
+        sys.exit(shared_token(*sys.argv[2:4]))
     profile, binary, *args = sys.argv[1:]
     profile = Path(profile)
-    os.umask(0o077)
     profile.mkdir(mode=0o700, parents=True, exist_ok=True)
     token = profile / "token.json"
     try:

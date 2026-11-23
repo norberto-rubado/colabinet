@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import inspect
 import json
 import logging
 import math
@@ -198,6 +199,8 @@ class Supervisor:
                 raise CreateRefused("请先停止所有托管会话，再更换账号。")
             cli.command()  # validate the launcher before persisting a changed account
             selected = save()
+            if inspect.isawaitable(selected):  # Accounts.repair talks to the CLI keyring asynchronously (R5-02)
+                selected = await selected
             self.account_id = selected if selected is not None else account_id
             self.cli = cli
             self._account_tunnels()

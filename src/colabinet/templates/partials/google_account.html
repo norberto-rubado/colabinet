@@ -8,7 +8,7 @@
       {% if account.state == 'connected' %}
       <div class="cb-account">
         <span class="cb-account-avatar" aria-hidden="true">{{ (account.email or '?')[0] | upper }}</span>
-        <div><p><span class="cb-account-email">{{ account.email or 'Google 账号已验证（无法获取邮箱）' }}</span> <span class="badge" data-tone="success">已连接</span></p>
+        <div><p><span class="cb-account-email"><!--email_off-->{{ account.email or 'Google 账号已验证（无法获取邮箱）' }}<!--/email_off--></span> <span class="badge" data-tone="success">已连接</span></p>
           <p>计算单元余额：{{ account.balance | num(2) }} CU。</p></div>
       </div>
       {% elif account.state == 'waiting' %}
@@ -24,7 +24,7 @@
       {% else %}<p>请检查连接，或登录你的 Google 账号。</p>{% endif %}
     </div>
     {% if account.active_email and account.state != 'connected' %}
-    <p class="cb-muted">当前账号：{{ account.active_email }}。添加其他账号时，在新账号登录成功前会保持此连接。</p>
+    <p class="cb-muted">当前账号：<!--email_off-->{{ account.active_email }}<!--/email_off-->。添加其他账号时，在新账号登录成功前会保持此连接。</p>
     {% endif %}
     {% if account.state == 'waiting' %}
     <p><a id="google-consent-link" class="btn" href="{{ account.url }}" target="_blank"
@@ -64,7 +64,7 @@
       <thead><tr><th>账号</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>{% for saved in account.accounts %}
         <tr id="google-saved-{{ saved.id }}" data-account-email="{{ saved.email }}">
-          <td>{{ saved.email }}{% if saved.shared %}<br><small class="cb-muted">共享 CLI 账号</small>{% endif %}</td>
+          <td><!--email_off-->{{ saved.email }}<!--/email_off-->{% if saved.shared %}<br><small class="cb-muted">共享 CLI 账号</small>{% endif %}</td>
           <td>{% if saved.active and saved.signed_in %}<span class="badge" data-tone="success">使用中</span>{% elif saved.active %}<span class="badge" data-tone="warning">需要登录</span>{% elif saved.signed_in %}<span class="badge" data-tone="neutral">已登录</span>{% else %}<span class="badge" data-tone="neutral">已退出</span>{% endif %}</td>
           <td>{% if saved.active %}<span class="badge" data-tone="info">当前账号</span>
           {% elif saved.signed_in %}<form hx-post="/ui/actions/auth/switch">
