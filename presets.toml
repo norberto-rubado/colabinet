@@ -474,9 +474,10 @@ A100-80 = { gen_tps = 139.787, prefill_tps = 6471.44, date = "2026-11-19", note 
 [[preset]]
 id = "qwen38-flash-next-sc117-abl-iq3s"
 engine = "llamacpp"
-label = "Qwen3.8-Flash-Next 无审查 IQ3_S（SC117，全显存）"
+label = "Qwen3.8-Flash-Next 无审查 IQ3_S（SC117，全显存，带视觉）"
 repo = "SC117/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF"
 file = "IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00001-of-00002.gguf"
+mmproj = "mmproj-Qwen3.8-Flash-Next-BF16.gguf"
 alias = "qwen3.8-flash-next-abliterated"
 release = "b12584"
 weights_gb = 83.9
@@ -486,20 +487,22 @@ parallel = 4
 prewarm = ["IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S-00002-of-00002.gguf"]
 
 [preset.gpu.G4]
+mmproj_gpu = true
 ctx = 262144
 kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "1024", "-ub", "512", "--cache-ram", "60000",
               "-lm", "mmap", "--lazy-mode", "on", "--temp", "1.0", "--top-p", "0.95", "--top-k", "20", "--min-p", "0"]
 
 [preset.measured]
-G4 = { gen_tps = 104.6, date = "2026-11-20", note = "实测：单请求（当时用 llama.cpp master 自编译）；muihbb 报告 8 并发总吞吐约 300 tok/s" }
+G4 = { gen_tps = 104.3, date = "2026-11-26", note = "实测：b12584，含视觉模块，VRAM 58.3 GiB；两张测试图全对" }
 
 [[preset]]
 id = "dsv41-flash-coder-abl-iq2xxs-engram"
 engine = "llamacpp"
-label = "DeepSeek-V4.1-Flash 748B Coder 无审查 IQ2_XXS + 完整 Engram（Abiray）"
+label = "DeepSeek-V4.1-Flash 748B Coder 无审查 IQ2_XXS + 完整 Engram（Abiray，带视觉）"
 repo = "Abiray/DeepSeek-V4.1-Flash-1017-Uncensored-GSQ-RCO-Coder-GGUF"
 file = "DeepSeek-V4.1-Flash-1017-Uncensored-GSQ-RCO-Coder-IQ2_XXS-00001-of-00006.gguf"
+mmproj = "mmproj-DeepSeek-V4.1-Flash-1017-BF16.gguf"
 alias = "deepseek-v4.1-flash-coder-uncensored"
 release = "b12584"
 # 72.1 GB backbone in VRAM + 110.6 GB Engram table memory-mapped from local disk and pre-read into page cache.
@@ -510,19 +513,21 @@ links = { "DeepSeek-V4.1-Flash-1017-Uncensored-GSQ-RCO-Coder-IQ2_XXS-00006-of-00
 prewarm = ["DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf"]
 
 [preset.gpu.G4]
+mmproj_gpu = true
 ctx = 524288  # 2026-11-23 measured on G4: 479,997-token prompt, 3/3 needles, prefill 211 tok/s (38 min), VRAM 78.4 GB at start
 kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24", "--temp", "1.0", "--top-p", "0.95"]  # model-card sampling as server default
 
 [preset.measured]
-G4 = { gen_tps = 58.1, prefill_tps = 526, date = "2026-11-20", note = "实测：b12584，下载 183 GB 约 9 分钟，VRAM 71.5 GB，Engram 预读 334 秒" }
+G4 = { gen_tps = 75.8, date = "2026-11-26", note = "实测：b12584，含视觉模块（与原版同一文件），VRAM 77.6 GiB，Engram 预读后；两张测试图全对" }
 
 [[preset]]
 id = "glm53-flash-huihui-abl-ud-iq2xxs"
 engine = "llamacpp"
-label = "GLM-5.3-Flash 321B 无审查 UD-IQ2_XXS（huihui）"
+label = "GLM-5.3-Flash 321B 无审查 UD-IQ2_XXS（huihui，带视觉）"
 repo = "huihui-ai/Huihui-GLM-5.3-Flash-abliterated-GGUF"
 file = "UD-IQ2_XXS/GLM-5.3-Flash-UD-IQ2_XXS-00001-of-00004.gguf"
+mmproj = "mmproj-model-bf16.gguf"
 alias = "glm-5.3-flash-abliterated"
 release = "b12584"
 weights_gb = 101.8
@@ -530,20 +535,23 @@ licence = "MIT"
 parallel = 2
 
 [preset.gpu.G4]
+mmproj_gpu = true
 ctx = 524288  # 2026-11-23 measured on G4: 484,103-token prompt, 3/3 needles, prefill 671 tok/s (12 min), VRAM 96.5 of 97.9 GB; 262144 earlier: 242K 3/3, 92.8 GB
 kv = "q8_0"
-# 101.8 GB of weights: the experts of 6 layers stay in host RAM so the rest fits in 96 GB (VRAM 91.3 GB measured).
-extra_args = ["-ngl", "99", "--n-cpu-moe", "6", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24", "--temp", "1.0", "--top-p", "0.95"]  # model-card sampling as server default
+# 101.8 GB of weights: the experts of 8 layers stay in host RAM so the rest plus the 1.16 GB vision projector fit in 96 GB.
+# With 6 layers (the text-only setting) the projector allocation fails with cudaMalloc out of memory (2026-11-26).
+extra_args = ["-ngl", "99", "--n-cpu-moe", "8", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24", "--temp", "1.0", "--top-p", "0.95"]  # model-card sampling as server default
 
 [preset.measured]
-G4 = { gen_tps = 57.6, prefill_tps = 1094, date = "2026-11-20", note = "实测：b12584，下载 102 GB 约 5 分钟，冷启动到可用约 8 分钟" }
+G4 = { gen_tps = 53.1, date = "2026-11-26", note = "实测：b12584，含视觉模块（--n-cpu-moe 8），VRAM 91.7 GiB；488,939-token 提示 3/3，预填充 572 tok/s；两张测试图全对。无视觉时 57.6 tok/s（2026-11-20）" }
 
 [[preset]]
 id = "qwen38-flash-next-ista-iq3s-llamacpp"
 engine = "llamacpp"
-label = "Qwen3.8-Flash-Next 原版 IQ3_S（ISTA，llama.cpp，日常写代码）"
+label = "Qwen3.8-Flash-Next 原版 IQ3_S（ISTA，llama.cpp，日常写代码，带视觉）"
 repo = "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF"
 file = "IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf"
+mmproj = "mmproj-Qwen3.8-Flash-Next-BF16.gguf"
 alias = "qwen3.8-flash-next"
 release = "b12584"
 # Same files as the SC117 abliterated build minus the 144 swapped tensors; same launch flags.
@@ -553,20 +561,22 @@ parallel = 4
 prewarm = ["IQ3_S/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00002-of-00002.gguf"]
 
 [preset.gpu.G4]
+mmproj_gpu = true
 ctx = 262144
 kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "1024", "-ub", "512", "--cache-ram", "60000",
               "-lm", "mmap", "--lazy-mode", "on", "--temp", "1.0", "--top-p", "0.95", "--top-k", "20", "--min-p", "0"]
 
 [preset.measured]
-G4 = { gen_tps = 105.9, prefill_tps = 3827, date = "2026-11-21", note = "实测：b12584，经公网网关；开机到就绪 5.5 分钟；原版会拒绝写 SYN 扫描器" }
+G4 = { gen_tps = 83.1, date = "2026-11-26", note = "实测：b12584，含视觉模块，VRAM 58.1 GiB，两张测试图全对；单次测量，比 11-21 无视觉的 105.9 低，原因未查；原版会拒绝写 SYN 扫描器" }
 
 [[preset]]
 id = "dsv41-flash-coder-ista-iq2xxs-engram"
 engine = "llamacpp"
-label = "DeepSeek-V4.1-Flash 748B Coder 原版 IQ2_XXS + 完整 Engram（ISTA，日常写代码）"
+label = "DeepSeek-V4.1-Flash 748B Coder 原版 IQ2_XXS + 完整 Engram（ISTA，日常写代码，带视觉）"
 repo = "ISTA-DASLab/DeepSeek-V4.1-Flash-1017-GSQ-RCO-Coder-GGUF"
 file = "IQ2_XXS/DeepSeek-V4.1-Flash-1017-GSQ-RCO-Coder-IQ2_XXS-00001-of-00006.gguf"
+mmproj = "mmproj-DeepSeek-V4.1-Flash-1017-BF16.gguf"
 alias = "deepseek-v4.1-flash-coder"
 release = "b12584"
 # 72.1 GB backbone in VRAM + 110.6 GB Engram (repo root) linked as shard 6 and pre-read into page cache.
@@ -577,12 +587,13 @@ links = { "IQ2_XXS/DeepSeek-V4.1-Flash-1017-GSQ-RCO-Coder-IQ2_XXS-00006-of-00006
 prewarm = ["DeepSeek-V4.1-Flash-Engram-IQ4_NL.gguf"]
 
 [preset.gpu.G4]
+mmproj_gpu = true
 ctx = 131072
 kv = "q8_0"
 extra_args = ["-ngl", "99", "-fa", "on", "--kv-unified", "-b", "2048", "-ub", "512", "-t", "24", "--temp", "1.0", "--top-p", "0.95"]  # model-card sampling as server default
 
 [preset.measured]
-G4 = { gen_tps = 59.3, date = "2026-11-21", note = "实测：b12584，Engram 预读完成后；开机到就绪 13 分钟，之后再预读约 5 分钟。关思考用 reasoning_effort=none" }
+G4 = { gen_tps = 67.1, date = "2026-11-26", note = "实测：b12584，含视觉模块，VRAM 70.8 GiB，Engram 预读后；两张测试图全对。关思考用 reasoning_effort=none" }
 
 # ComfyUI native nodes; HF file sizes checked 2026-11-21. Download size is not simultaneous VRAM use.
 [engines.comfyui]
@@ -644,4 +655,3 @@ files = [
 ctx = 32768
 [preset.measured]
 G4 = { seconds_per_output = 81.7, unit = "video", date = "2026-11-21", note = "实测：G4，经公网 /v1/videos，5 秒 1344×768 有声视频（H.264 + AAC 立体声），Turbo 8 步：文生 81.7 秒、图生 + NSFW LoRA 82.4 秒；开机到就绪约 7 分钟（44 GB）" }
-
