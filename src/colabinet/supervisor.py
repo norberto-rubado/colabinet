@@ -30,7 +30,7 @@ from .diagnostics import bounded_diagnostic
 from .engines import ENGINES, VM_ROOT, Engine, RunSpec
 from .engines.base import VM_DIR
 from .engines.strata import QWEN36_CTX, QWEN36_KV, QWEN36_REPO
-from .guards import IDLE_STATES, evaluate, evaluate_daily
+from .guards import IDLE_STATES, evaluate, evaluate_cap, evaluate_daily
 from .net import first_free, port_free
 from .presets import PresetError, Presets, load_presets
 from .proxy import ProxyManager, Route, SessionProxy
@@ -75,6 +75,9 @@ def stop_if_cancelled() -> None:
     task = asyncio.current_task()
     if task is not None and task.cancelling():
         raise asyncio.CancelledError
+
+
+MAX_CAP_EXTEND_CU = 1000.0
 
 
 class CreateRefused(Exception):
@@ -949,6 +952,24 @@ class Supervisor:
         await self._update(sid, last_activity=now)
         self.alerts.clear(f"idle_warn:{sid}")
 
+    async def extend_cap(self, sid: int, cu: float) -> float:
+        """Raise a live session's CU cap by `cu` (from the current spend if that is already past the cap)."""
+        if not (0 < cu <= MAX_CAP_EXTEND_CU):
+            raise CreateRefused(f"追加的 CU 必须在 0 到 {MAX_CAP_EXTEND_CU:.0f} 之间")
+        async with self._session_locks.setdefault(sid, asyncio.Lock()):
+            row = await self.store.session(sid)
+            self._own_account(row)
+            if not row or row["state"] not in LIVE_STATES or row["state"] == "stopping":
+                raise CreateRefused("只能为运行中的会话追加 CU 上限")
+            if not row["cu_cap"]:
+                raise CreateRefused("此会话没有设置 CU 上限")
+            base = max(row["cu_cap"], billing.session_cu(row, self.now()))
+            cap = round(base + cu, 2)
+            await self._update(sid, cu_cap=cap)
+            await self._event(sid, "cu_cap_extended", frm=row["cu_cap"], to=cap)
+            self.alerts.clear(f"cu_cap_warn:{sid}")
+            return cap
+
     async def decide(self, sid: int, decision: str) -> None:
         async with self._session_locks.setdefault(sid, asyncio.Lock()):
             await self._decide_locked(sid, decision)
@@ -1289,7 +1310,7 @@ class Supervisor:
         await self._cancel_driver(sid)
         await self.tunnels.stop(row["tunnel_pid"], row["colab_name"])
         await self.proxies.unbind(sid)
-        self.alerts.clear_session(sid, {"idle_warn", "create_slow", "engine_down", "gpu_mismatch", "setup_failed",
+        self.alerts.clear_session(sid, {"idle_warn", "cu_cap_warn", "create_slow", "engine_down", "gpu_mismatch", "setup_failed",
                                         "tunnel_slow", "endpoint_missing"})
         self._activity.pop(sid, None)
         self._queue_ok.pop(sid, None)
@@ -1444,7 +1465,14 @@ class Supervisor:
             last = act.effective(now) if act else (row["last_activity"] or 0.0)
             if floor is not None:
                 last = max(last, floor)
-            d = evaluate(row, now, last, self.s.grace_s)
+            busy = bool(act and act.busy(now))
+            d = evaluate(row, now, last, self.s.grace_s, busy=busy)
+            cap_warn = evaluate_cap(row, now, busy=busy)
+            if cap_warn.action == "warn" and d.action != "stop":
+                self.alerts.raise_("cu_cap_warn", f"{row['colab_name']}：{cap_warn.message}", sid,
+                                   actions=["extend-cap"])
+            else:
+                self.alerts.clear(f"cu_cap_warn:{sid}")
             if d.action == "stop":
                 await self._event(sid, "guard", reason=d.reason, message=d.message)
                 await self.stop(sid, d.reason)

@@ -34,6 +34,11 @@ class Activity:
         if useful:
             self.last = max(self.last, t)
 
+    def busy(self, now: float) -> bool:
+        """An inference request is in flight and still counts (same rules as effective())."""
+        return any(now - started <= INFLIGHT_MAX_S or now - last_byte <= BYTE_WINDOW_S
+                   for started, last_byte in self._inflight.values())
+
     def effective(self, now: float) -> float:
         best = self.last
         for started, last_byte in self._inflight.values():

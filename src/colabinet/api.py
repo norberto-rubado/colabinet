@@ -73,6 +73,10 @@ class Extend(BaseModel):
     cu: float = 5.0
 
 
+class ExtendCap(BaseModel):
+    cu: float = 20.0
+
+
 def parse_deadline(hhmm: str | None, now: datetime | None = None) -> float | None:
     if not hhmm:
         return None
@@ -181,6 +185,10 @@ def create_app(sup: Supervisor, token: str, ui_port: int, csrf: str | None = Non
     async def keep(sid: int):
         await sup.keep(sid)
         return {"ok": True}
+
+    @app.post("/api/sessions/{sid}/extend-cap")
+    async def extend_cap(sid: int, body: ExtendCap):
+        return {"cu_cap": await sup.extend_cap(sid, body.cu)}
 
     @app.post("/api/sessions/{sid}/gpu-continue")
     async def gpu_continue(sid: int, body: Confirm):

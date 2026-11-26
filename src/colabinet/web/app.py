@@ -526,6 +526,13 @@ def mount_ui(app: FastAPI, sup: Supervisor, csrf: str) -> None:
         elif action == "keep":
             _, err = await refused(sup.keep, sid)
             msg = ("success", f"{name}：闲置计时已重置")
+        elif action == "extend-cap":
+            try:
+                cu = float(form.get("cu") or 20)
+            except ValueError:
+                return JSONResponse({"error": "请填写追加的 CU 数"}, 409)
+            cap, err = await refused(sup.extend_cap, sid, cu)
+            msg = ("success", f"{name}：CU 上限已调整为 {cap:.2f}") if cap is not None else None
         elif action == "gpu-continue":
             _, err = await refused(sup.decide, sid, "continue")
             msg = ("info", f"{name}：在分配到的 GPU 上继续")

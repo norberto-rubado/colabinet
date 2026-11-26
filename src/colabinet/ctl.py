@@ -87,6 +87,9 @@ def run(argv: list[str], settings: Settings, out=print) -> int:
     se.add_argument("name")
     se.add_argument("--yes", action="store_true")
     ex = sub.add_parser("extend-daily-cap")
+    xc = sub.add_parser("extend-cap", help="raise a live session's CU cap")
+    xc.add_argument("id", type=int)
+    xc.add_argument("--cu", type=float, default=20.0)
     rc = sub.add_parser("reconfigure")
     rc.add_argument("id", type=int)
     rc.add_argument("--preset")
@@ -163,6 +166,8 @@ def run(argv: list[str], settings: Settings, out=print) -> int:
             confirm(f"stop the unmanaged runtime {a.name!r}?", a.yes)
             cl.call("POST", f"/api/external/{a.name}/stop", {"confirm": True})
             out("ok")
+        elif a.cmd == "extend-cap":
+            out(f"session {a.id} CU cap is now {cl.call('POST', f'/api/sessions/{a.id}/extend-cap', {'cu': a.cu})['cu_cap']:.2f} CU")
         elif a.cmd == "extend-daily-cap":
             out(f"today's cap is now {cl.call('POST', '/api/daily-cap/extend', {'cu': a.cu})['cap']:.2f} CU")
         elif a.cmd == "alerts":

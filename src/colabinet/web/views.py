@@ -190,6 +190,9 @@ async def session_detail(sup: Supervisor, sid: int) -> dict[str, Any] | None:
             "deadline": statement["deadline"], "cu_cap": statement["cu_cap"],
         "cap_pct": min(100, round(100 * statement["cu"] / statement["cu_cap"])) if statement["cu_cap"] else None,
         "last_exec_ok": statement["last_exec_ok"],
+        "cap_left_s": max(0, round((statement["cu_cap"] - statement["cu"]) / statement["rate_cu_h"] * 3600))
+        if statement["cu_cap"] and statement["rate_cu_h"] and statement["state"] not in ("stopping", "stopped", "failed")
+        else None,
     }
     return {"s": statement, "runs": runs, "steps": steps, "speed": speed, "guards": guards,
             "creation": await sup.store.creation_diagnostics(sid),

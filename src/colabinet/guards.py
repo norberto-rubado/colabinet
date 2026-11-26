@@ -11,6 +11,10 @@ IDLE_STATES = {"tunnelling", "ready", "engine_down"}
 NO_GUARD_STATES = {"stopping", "stopped", "failed"}
 IDLE_WARN_S = 5 * 60
 DAILY_WARN_FRACTION = 0.8
+CAP_WARN_FRACTION = 0.8
+# Past the per-session CU cap an in-flight inference request may finish for up to this long (billed at the session
+# rate); after that the cap stops the VM even mid-request.
+CAP_BUSY_GRACE_S = 30 * 60
 
 
 @dataclass(frozen=True)
@@ -20,13 +24,19 @@ class Decision:
     message: str = ""
 
 
-def evaluate(s: dict[str, Any], now: float, activity_last: float, grace_s: float) -> Decision:
-    """One session. `activity_last` is Activity.effective(now) merged with the row's stored last_activity."""
+def cap_grace_cu(s: dict[str, Any]) -> float:
+    return s["rate_cu_h"] * CAP_BUSY_GRACE_S / 3600
+
+
+def evaluate(s: dict[str, Any], now: float, activity_last: float, grace_s: float, busy: bool = False) -> Decision:
+    """One session. `activity_last` is Activity.effective(now) merged with the row's stored last_activity. `busy`: an
+    inference request is in flight, which defers the CU-cap stop by at most CAP_BUSY_GRACE_S worth of CU."""
     state = s["state"]
     if state in NO_GUARD_STATES:
         return Decision()
-    if s.get("cu_cap") and session_cu(s, now) >= s["cu_cap"]:
-        return Decision("stop", "cu_cap", f"已达到 CU 上限（{s['cu_cap']:.2f} CU）")
+    cap = s.get("cu_cap")
+    if cap and session_cu(s, now) >= cap and not (busy and session_cu(s, now) < cap + cap_grace_cu(s)):
+        return Decision("stop", "cu_cap", f"已达到 CU 上限（{cap:.2f} CU）")
     if s.get("deadline") and now >= s["deadline"]:
         return Decision("stop", "deadline", "已到定时停止时间")
     if state == "setup_failed" and now - s["state_since"] >= grace_s:
@@ -42,6 +52,25 @@ def evaluate(s: dict[str, Any], now: float, activity_last: float, grace_s: float
             return Decision("stop", "idle", f"已闲置 {idle_min} 分钟")
         if idle >= limit - IDLE_WARN_S:
             return Decision("warn", "idle", f"{max(1, round((limit - idle) / 60))} 分钟后闲置自动停止")
+    return Decision()
+
+
+def evaluate_cap(s: dict[str, Any], now: float, busy: bool = False) -> Decision:
+    """Per-session CU cap warning (the stop itself is in evaluate()): from CAP_WARN_FRACTION of the cap, and while an
+    in-flight request holds the session past the cap."""
+    cap = s.get("cu_cap")
+    if s["state"] in NO_GUARD_STATES or not cap:
+        return Decision()
+    cu = session_cu(s, now)
+    rate = s["rate_cu_h"] or 0.0
+    if cu >= cap:
+        if not busy:
+            return Decision()  # evaluate() stops it
+        left_min = max(1, round((cap + cap_grace_cu(s) - cu) / rate * 60)) if rate else 0
+        return Decision("warn", "cu_cap", f"已达到 CU 上限 {cap:.2f}，正在等待进行中的请求完成，最多再 {left_min} 分钟")
+    if cu >= CAP_WARN_FRACTION * cap:
+        left_min = max(1, round((cap - cu) / rate * 60)) if rate else 0
+        return Decision("warn", "cu_cap", f"已用 {cu:.2f} / {cap:.2f} CU，按 {rate:.2f} CU/h 约 {left_min} 分钟后停止")
     return Decision()
 
 

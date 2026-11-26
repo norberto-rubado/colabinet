@@ -1,5 +1,5 @@
 {% from "macros.html" import icon, nav_attrs %}
-{% set alert_labels = {'account_reconnect': '需要重新连接账号', 'create_orphan': '可能有遗留 VM', 'create_slow': '创建缓慢', 'daily_cap': '每日上限', 'endpoint_missing': '端点缺失', 'engine_down': '推理引擎无响应', 'external_runtime': '外部运行时', 'external_keepalive': '外部运行时保活', 'external_autostop': '外部运行时自动停止失败', 'external_unnamed': '外部运行时已失去名称', 'foreign_vm': '陌生 VM', 'gpu_mismatch': 'GPU 不符', 'idle_warn': '即将闲置自动停止', 'low_balance': '余额不足', 'preflight': '启动前检查', 'proxy_port': '代理端口', 'setup_failed': '设置失败', 'ssh_429': 'SSH 连接受限', 'stop_unconfirmed': '停止未确认', 'tunnel_slow': '隧道连接缓慢', 'unknown_runtime': '未知运行时'} %}
+{% set alert_labels = {'account_reconnect': '需要重新连接账号', 'create_orphan': '可能有遗留 VM', 'create_slow': '创建缓慢', 'daily_cap': '每日上限', 'endpoint_missing': '端点缺失', 'engine_down': '推理引擎无响应', 'external_runtime': '外部运行时', 'external_keepalive': '外部运行时保活', 'external_autostop': '外部运行时自动停止失败', 'external_unnamed': '外部运行时已失去名称', 'foreign_vm': '陌生 VM', 'gpu_mismatch': 'GPU 不符', 'idle_warn': '即将闲置自动停止', 'cu_cap_warn': '即将达到 CU 上限', 'low_balance': '余额不足', 'preflight': '启动前检查', 'proxy_port': '代理端口', 'setup_failed': '设置失败', 'ssh_429': 'SSH 连接受限', 'stop_unconfirmed': '停止未确认', 'tunnel_slow': '隧道连接缓慢', 'unknown_runtime': '未知运行时'} %}
 {% if overview_data.alerts %}
 <section class="cb-attention">
   <div class="cb-section-head"><h2 class="cb-section-title">需要处理</h2><span class="cb-count" data-tone="danger">{{ overview_data.alerts | length }}</span></div>
@@ -16,6 +16,8 @@
           <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="destructive" onclick="cbConfirmStop({{ alert.session_id }}, '会话 {{ alert.session_id }}')">停止</button>
           {% elif act in ('keep', 'abandon', 'gpu-continue', 'retry-setup') and alert.session_id %}
           <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ alert.session_id }}/{{ act }}" {% if act in ('gpu-continue', 'retry-setup') %}hx-confirm="要在这台正在计费的 VM 上继续设置吗？" hx-vals='{"confirm":"yes"}'{% endif %} hx-swap="none">{{ {'keep': '保持（延长闲置）', 'abandon': '放弃', 'gpu-continue': '继续', 'retry-setup': '重试设置'}[act] }}</button>
+          {% elif act == 'extend-cap' and alert.session_id %}
+          {% for n in (10, 50) %}<button class="btn" data-cb-key="{{ act }}-{{ n }}" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ alert.session_id }}/extend-cap" hx-vals='{"cu": "{{ n }}"}' hx-swap="none">上限 +{{ n }} CU</button>{% endfor %}
           {% elif act == 'extend-daily-cap' %}
           <button class="btn" data-cb-key="{{ act }}" data-size="sm" data-variant="outline" hx-post="/ui/actions/daily-cap/extend" hx-swap="none">今日 +5 CU</button>
           {% elif act == 'stop-external' and alert.target %}

@@ -13,8 +13,9 @@
 {% for alert in detail.alerts %}
 <div class="alert" data-cb-key="alert-{{ alert.key }}" data-variant="{{ 'destructive' if alert.level == 'critical' else 'warning' }}">{{ icon('alert') }}<h2>{{ alert.kind | replace('_', ' ') }}</h2>
   <section><p>{{ alert.message }}</p>
-  {% if alert.actions %}<div class="cb-row">{% for act in alert.actions if act in ('keep', 'abandon', 'gpu-continue', 'retry-setup') %}
-    <button class="btn" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/{{ act }}" {% if act in ('gpu-continue', 'retry-setup') %}hx-confirm="要在这台正在计费的 VM 上继续设置吗？" hx-vals='{"confirm":"yes"}'{% endif %} hx-swap="none">{{ {'keep': '保持（延长闲置）', 'abandon': '放弃', 'gpu-continue': '在此 GPU 上继续', 'retry-setup': '重试设置'}[act] }}</button>{% endfor %}</div>{% endif %}
+  {% if alert.actions %}<div class="cb-row">{% for act in alert.actions if act in ('keep', 'abandon', 'gpu-continue', 'retry-setup', 'extend-cap') %}
+    {% if act == 'extend-cap' %}{% for n in (10, 50) %}<button class="btn" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/extend-cap" hx-vals='{"cu": "{{ n }}"}' hx-swap="none">上限 +{{ n }} CU</button>{% endfor %}{% else %}
+    <button class="btn" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/{{ act }}" {% if act in ('gpu-continue', 'retry-setup') %}hx-confirm="要在这台正在计费的 VM 上继续设置吗？" hx-vals='{"confirm":"yes"}'{% endif %} hx-swap="none">{{ {'keep': '保持（延长闲置）', 'abandon': '放弃', 'gpu-continue': '在此 GPU 上继续', 'retry-setup': '重试设置'}[act] }}</button>{% endif %}{% endfor %}</div>{% endif %}
   </section></div>
 {% endfor %}
 {% if session.state in ('creating', 'gpu_check', 'setting_up', 'reconfiguring', 'tunnelling') %}
@@ -50,7 +51,7 @@
       <dt>运行时长 / 成本</dt><dd>{{ session.up_s | dur }} · {{ session.cu | num(3) }} CU</dd>
       <dt>闲置自动停止</dt><dd>{% if guards.idle_min %}{{ guards.idle_min }} 分钟{% if guards.idle_left_s is not none %} · 剩余 <strong class="{{ 'cb-tone-warning' if guards.idle_left_s <= 300 else '' }}">{{ guards.idle_left_s | dur }}</strong> <button class="btn" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/keep" hx-swap="none">保持</button>{% endif %}{% else %}关闭{% endif %}</dd>
       <dt>定时停止</dt><dd>{{ guards.deadline | day if guards.deadline else '无' }}</dd>
-      <dt>CU 上限</dt><dd>{% if guards.cu_cap %}{{ session.cu | num(2) }} / {{ guards.cu_cap | num(2) }}{{ meter(guards.cap_pct, "本会话已用计算单元占上限的比例", '已用 ' ~ (session.cu | num(2)) ~ ' / ' ~ (guards.cu_cap | num(2)) ~ ' 计算单元', max=guards.cu_cap | round(2), now=[guards.cu_cap | round(2), session.cu | round(2)] | min) }}{% else %}无{% endif %}</dd>
+      <dt>CU 上限</dt><dd>{% if guards.cu_cap %}{{ session.cu | num(2) }} / {{ guards.cu_cap | num(2) }}{{ meter(guards.cap_pct, "本会话已用计算单元占上限的比例", '已用 ' ~ (session.cu | num(2)) ~ ' / ' ~ (guards.cu_cap | num(2)) ~ ' 计算单元', max=guards.cu_cap | round(2), now=[guards.cu_cap | round(2), session.cu | round(2)] | min) }}{% if guards.cap_left_s is not none %} · 约 <strong class="{{ 'cb-tone-warning' if guards.cap_pct >= 80 else '' }}">{{ guards.cap_left_s | dur }}</strong> 后停止{% endif %}{% if session.state not in ('stopping', 'stopped', 'failed') %} {% for n in (10, 50) %}<button class="btn" data-size="sm" data-variant="outline" hx-post="/ui/actions/sessions/{{ session.id }}/extend-cap" hx-vals='{"cu": "{{ n }}"}' hx-swap="none">+{{ n }} CU</button>{% endfor %}{% endif %}{% else %}无{% endif %}</dd>
       <dt>保活</dt><dd>上次成功 {{ guards.last_exec_ok | ago }}</dd>
       {% if session.stop_reason %}<dt>已停止</dt><dd>{{ session.stop_reason }}{% if session.stopped_at %}（{{ session.stopped_at | day }}）{% endif %}</dd>{% endif %}
     </dl></section></section>
